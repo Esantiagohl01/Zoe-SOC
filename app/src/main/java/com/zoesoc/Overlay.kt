@@ -18,7 +18,7 @@ import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
-/** Burbuja flotante arrastrable. Tocarla alterna entre vista completa (carro + velocidad) y compacta. */
+/** Burbuja flotante arrastrable. Tocarla alterna entre vista completa (con carro) y compacta. */
 class Overlay(private val ctx: Context) {
     private val wm = ctx.getSystemService(WindowManager::class.java)
     private val prefs = Prefs(ctx)
@@ -51,7 +51,7 @@ class Overlay(private val ctx: Context) {
     fun update(d: ZoeData?, status: String) {
         val v = view ?: return
         v.soc = d?.displaySoc
-        v.speed = d?.speedKmh
+        if (v.status != status && (v.status == "OK" || status == "OK")) v.requestLayout()
         v.status = status
         v.alpha = if (d == null || System.currentTimeMillis() - d.time > 120_000) 0.6f else 1f
         v.invalidate()
@@ -102,10 +102,9 @@ class Overlay(private val ctx: Context) {
     }
 }
 
-/** Dibujo de la burbuja: carro + porcentaje, 8 barritas como el tablero y la velocidad. */
+/** Dibujo de la burbuja: carro + porcentaje y 8 barritas como el tablero. */
 class BubbleView(ctx: Context) : View(ctx) {
     var soc: Double? = null
-    var speed: Double? = null
     var status: String = ""
     var compact = false
 
@@ -115,7 +114,6 @@ class BubbleView(ctx: Context) : View(ctx) {
 
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xD9111418.toInt() }
     private val pctPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.DEFAULT_BOLD; textSize = sp(26f) }
-    private val speedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.DEFAULT_BOLD; color = Color.WHITE; textSize = sp(20f) }
     private val smallPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFB8C0C8.toInt(); textSize = sp(11f) }
     private val segPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val body = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFDDE3EA.toInt() }
@@ -144,8 +142,8 @@ class BubbleView(ctx: Context) : View(ctx) {
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val w = if (compact) 118f else 196f
-        val h = if (compact) 60f else 92f
+        val w = if (compact) 118f else 160f
+        val h = (if (compact) 60f else 64f) + (if (status != "OK") 16f else 0f)
         setMeasuredDimension(dp(w).roundToInt(), dp(h).roundToInt())
     }
 
@@ -164,22 +162,14 @@ class BubbleView(ctx: Context) : View(ctx) {
             c.drawText(pct, pad, dp(34f), pctPaint)
             barsTop = dp(42f)
         } else {
-            drawCar(c, pad, dp(10f), dp(60f))
-            c.drawText(pct, pad + dp(70f), dp(36f), pctPaint)
+            drawCar(c, pad, dp(12f), dp(58f))
+            c.drawText(pct, pad + dp(66f), dp(36f), pctPaint)
             barsTop = dp(46f)
         }
         drawBars(c, pad, barsTop, w - pad, barsTop + dp(9f), col)
 
-        if (!compact) {
-            val base = dp(80f)
-            val s = speed
-            if (s != null) {
-                val num = s.roundToInt().toString()
-                c.drawText(num, pad, base, speedPaint)
-                c.drawText(" km/h", pad + speedPaint.measureText(num), base, smallPaint)
-            } else if (status != "OK") {
-                c.drawText(status.take(26), pad, base, smallPaint)
-            }
+        if (status != "OK") {
+            c.drawText(status.take(if (compact) 16 else 24), pad, barsTop + dp(23f), smallPaint)
         }
     }
 

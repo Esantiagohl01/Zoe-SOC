@@ -9,7 +9,6 @@ data class ZoeData(
     val tempC: Double? = null,     // temperatura promedio de la batería
     val currentA: Double? = null,  // corriente de la batería
     val rangeKm: Int? = null,      // autonomía que muestra el carro
-    val speedKmh: Double? = null,  // velocidad (trama libre 5D7)
     val time: Long = System.currentTimeMillis(),
 ) {
     val displaySoc: Double? get() = soc ?: realSoc
@@ -23,7 +22,6 @@ data class ZoeData(
  *   2161 bits 72-79  ×0.5    → SOH %
  *  EVC pide 7E4, responde 7EC
  *   223451 últimos 2 bytes → autonomía km
- *  Trama libre 5D7 bits 0-15 ×0.01 → velocidad km/h
  */
 class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
     private var soh: Double? = null
@@ -77,14 +75,6 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
         return ZoeData(usoc, realSoc, soh, temp, current, range)
     }
 
-    /** Velocidad en km/h, escuchando la trama 5D7 que el carro emite sola. */
-    fun speed(): Double {
-        val b = elm.freeFrame("5D7")
-        val v = Bits.field(b, 0, 15, 0.01, 0.0)
-        if (v > 250) throw ElmException("velocidad fuera de rango: $v")
-        return v
-    }
-
     companion object {
         const val LBC_TX = "79B"
         const val LBC_RX = "7BB"
@@ -97,8 +87,6 @@ object Fmt {
     private fun f(v: Double, dec: Int) = String.format(Locale.US, "%.${dec}f", v)
 
     fun soc(d: ZoeData?): String = d?.displaySoc?.let { f(it, 0) + "%" } ?: "--%"
-
-    fun speed(d: ZoeData?): String = d?.speedKmh?.let { f(it, 0) + " km/h" } ?: ""
 
     /** Línea corta para la notificación y el widget. */
     fun short(d: ZoeData?): String {
@@ -120,7 +108,6 @@ object Fmt {
         d.tempC?.let { p += "Temp. batería: " + f(it, 0) + " °C" }
         d.currentA?.let { p += "Corriente: " + f(it, 1) + " A" }
         d.rangeKm?.let { p += "Autonomía: $it km" }
-        d.speedKmh?.let { p += "Velocidad: " + f(it, 0) + " km/h" }
         val age = (System.currentTimeMillis() - d.time) / 1000
         p += "Actualizado hace $age s"
         return p.joinToString("\n")
