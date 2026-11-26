@@ -67,6 +67,9 @@ class Prefs(ctx: Context) {
     var intervalSec: Int
         get() = p.getInt("interval", 15)
         set(v) = p.edit().putInt("interval", v).apply()
+    var compact: Boolean
+        get() = p.getBoolean("compact", false)
+        set(v) = p.edit().putBoolean("compact", v).apply()
     var bubbleX: Int
         get() = p.getInt("bx", 40)
         set(v) = p.edit().putInt("bx", v).apply()

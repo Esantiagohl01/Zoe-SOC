@@ -75,14 +75,40 @@ class ZoeService : Service() {
                 elm.init()
                 val reader = ZoeReader(elm) { ZoeState.log(it) }
                 ZoeState.publish(null, "Conectado")
+                var current: ZoeData? = null
+                var lastBattery = 0L
+                var speedFails = 0
                 while (running) {
-                    try {
-                        val d = reader.read()
-                        ZoeState.publish(d, "OK")
-                        if (!pause(prefs.intervalSec * 1000L)) break
-                    } catch (e: ElmException) {
-                        ZoeState.publish(null, "Sin datos: ${e.message}")
-                        if (!pause(20_000)) break
+                    // Batería: cada N segundos (configurable).
+                    if (current == null || System.currentTimeMillis() - lastBattery >= prefs.intervalSec * 1000L) {
+                        try {
+                            val d = reader.read()
+                            current = d.copy(speedKmh = current?.speedKmh)
+                            lastBattery = System.currentTimeMillis()
+                            speedFails = 0 // reintenta la velocidad en cada ciclo de batería
+                            ZoeState.publish(current, "OK")
+                        } catch (e: ElmException) {
+                            current = null
+                            ZoeState.publish(null, "Sin datos: ${e.message}")
+                            if (!pause(20_000)) break
+                            continue
+                        }
+                    }
+                    // Velocidad: cada ~1 s.
+                    val cur = current
+                    if (cur != null && speedFails < 3) {
+                        try {
+                            val v = reader.speed()
+                            val upd = cur.copy(speedKmh = v)
+                            current = upd
+                            ZoeState.publish(upd, "OK")
+                        } catch (e: ElmException) {
+                            speedFails++
+                            if (speedFails == 3) ZoeState.log("Velocidad no disponible: ${e.message}")
+                        }
+                        if (!pause(600)) break
+                    } else {
+                        if (!pause(1000)) break
                     }
                 }
             } catch (e: InterruptedException) {
@@ -109,6 +135,8 @@ class ZoeService : Service() {
         false
     }
 
+    private var lastNotice = ""
+
     private fun onState() {
         val d = ZoeState.data
         if (prefs.overlay) {
@@ -117,10 +145,14 @@ class ZoeService : Service() {
         } else {
             overlay.hide()
         }
-        SocWidget.push(this)
+        // El widget y la notificación solo se tocan cuando cambia la batería o el estado (no con cada velocidad).
+        val title = "Zoe " + Fmt.soc(d)
         val sub = Fmt.short(d).ifEmpty { ZoeState.status }
-        getSystemService(NotificationManager::class.java)
-            ?.notify(NID, notification("Zoe " + Fmt.soc(d), sub))
+        val key = "$title|$sub|${ZoeState.status}"
+        if (key == lastNotice) return
+        lastNotice = key
+        SocWidget.push(this)
+        getSystemService(NotificationManager::class.java)?.notify(NID, notification(title, sub))
     }
 
     private fun createChannel() {

@@ -13,7 +13,7 @@ Solo lee datos. No escribe nada en los módulos del carro.
   - Temperatura promedio de la batería
   - Corriente
   - Autonomía
-- Muestra el SOC en una burbuja arrastrable encima de cualquier app. Si la tocas, muestra u oculta la línea de detalle.
+- Muestra en una burbuja arrastrable, encima de cualquier app (también AutoKit): un carro, el SOC, 8 barritas como las del tablero y la velocidad (cada ~1 s). Si la tocas, pasa a modo compacto (solo % y barritas).
 - También trae un widget, por si el launcher del Tbox los soporta.
 - Arranca sola al encender la caja (se puede desactivar).
 - Si el carro está apagado, reintenta cada 20 s. Si se pierde el Bluetooth, reconecta cada 10 s.
@@ -53,6 +53,7 @@ Los valores vienen de los archivos de campos de CanZE para el Zoe fase 1. Aun as
 | Temp. promedio | 79B / 7BB | 2104 | 600–607 | x−40 |
 | SOH | 79B / 7BB | 2161 | 72–79 | ×0.5 |
 | Autonomía | 7E4 / 7EC | 223451 | últimos 2 bytes | km |
+| Velocidad | trama libre 5D7 (solo escucha) | — | 0–15 | ×0.01 km/h |
 
 ## Archivos
 

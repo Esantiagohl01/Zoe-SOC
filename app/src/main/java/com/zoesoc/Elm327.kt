@@ -9,6 +9,7 @@ class ElmException(msg: String) : Exception(msg)
  */
 class Elm327(private val t: Transport, private val log: (String) -> Unit) {
     private var ecu = ""
+    private var mode = "diag" // "diag" = peticiones ISO-TP; "mon:XXX" = escuchando una trama libre
 
     fun cmd(c: String, timeoutMs: Long = 2500): String {
         t.clearInput()
@@ -25,9 +26,15 @@ class Elm327(private val t: Transport, private val log: (String) -> Unit) {
         }
         log("Scanner: ${clean(cmd("ATI"))}")
         ecu = ""
+        mode = "diag"
     }
 
     private fun select(tx: String, rx: String) {
+        if (mode != "diag") {
+            cmd("ATCAF1")
+            mode = "diag"
+            ecu = ""
+        }
         if (ecu == tx) return
         for (c in listOf("ATSH$tx", "ATCRA$rx", "ATFCSH$tx", "ATFCSD300000", "ATFCSM1")) {
             val r = cmd(c)
@@ -50,10 +57,35 @@ class Elm327(private val t: Transport, private val log: (String) -> Unit) {
         return b
     }
 
+    /**
+     * Escucha una trama libre del bus (las que los módulos emiten solos, ej. 5D7 = velocidad)
+     * durante unos milisegundos y devuelve la última recibida. Solo escucha, no envía nada al carro.
+     */
+    fun freeFrame(id: String, listenMs: Long = 250): ByteArray {
+        if (mode != "mon:$id") {
+            cmd("ATCAF0")
+            cmd("ATCRA$id")
+            mode = "mon:$id"
+            ecu = ""
+        }
+        t.clearInput()
+        t.write("ATMA\r")
+        Thread.sleep(listenMs)
+        t.write("\r") // cualquier carácter detiene el monitoreo
+        val r = t.readUntilPrompt(2500)
+        val frames = r.split('\r', '\n')
+            .map { it.trim().replace(" ", "") }
+            .filter { FRAME_LINE.matches(it) && it.length % 2 == 0 }
+        val last = frames.lastOrNull { it.length == 16 } ?: frames.lastOrNull()
+            ?: throw ElmException("sin trama $id")
+        return ByteArray(last.length / 2) { last.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
+    }
+
     private fun clean(r: String) = r.replace('\r', ' ').replace('\n', ' ').trim()
 
     companion object {
         private val HEX_LINE = Regex("^([0-9A-Fa-f]+:)?[0-9A-Fa-f]+$")
+        private val FRAME_LINE = Regex("^[0-9A-Fa-f]{4,16}$")
         private val ERRORS = listOf("NODATA", "CANERROR", "ERROR", "STOPPED", "UNABLE", "BUFFERFULL", "?")
 
         /** Convierte la salida del ELM (con ATS0/ATH0/ATCAF1) a bytes; arma las respuestas multi-trama "0:... 1:...". */

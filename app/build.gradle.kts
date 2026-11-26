@@ -11,15 +11,28 @@ android {
         applicationId = "com.zoesoc"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = 2
+        versionName = "0.2"
+    }
+
+    // Llave fija para que cada versión nueva se instale encima de la anterior
+    // (GitHub crearía una llave distinta en cada compilación). Solo para uso personal.
+    signingConfigs {
+        create("fixed") {
+            storeFile = file("zoesoc.jks")
+            storePassword = "zoesoc123"
+            keyAlias = "zoesoc"
+            keyPassword = "zoesoc123"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("fixed")
+        }
         release {
             isMinifyEnabled = false
-            // Firmado con la llave debug para poder instalarlo directo (uso personal).
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("fixed")
         }
     }
 
