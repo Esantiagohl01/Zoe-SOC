@@ -1,6 +1,7 @@
 package com.zoesoc
 
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.roundToInt
 
@@ -60,9 +61,10 @@ data class ZoeData(
  *               2104 temp. promedio (600-607, x−40) · 2161 SOH (72-79 ×0.5) · 2141/2142 voltaje de celdas (×0.001)
  *  EVC 7E4/7EC: 223451 autonomía (últimos 2 bytes) · 222005 batería 12 V (24-39 ×0.01)
  * Tramas libres (solo se escuchan):
- *  654 bit 2 enchufe conectado, 52-61 ×0.1 consumo promedio · 42E 56-63 ×0.3 potencia de carga
+ *  654 bit 2 enchufe conectado, 52-61 ×0.1 consumo promedio
+ *  Potencia de carga = voltaje (EVC 223203, 24-39 ×0.5 V) × corriente de la batería (2101)
  *  427 49-57 ×0.1 energía disponible · 673 presiones ×13.725 mbar (FL 40, FR 32, RL 24, RR 16)
- *  5D7 0-15 ×0.01 velocidad (×1,064 para igualar el tablero) · 1FD 48-55 (x−80) potencia kW
+ *  5D7 0-15 ×0.01 velocidad (×1,026 + 1,8 para igualar el tablero) · 1FD 48-55 (x−80) potencia kW
  *  656 48-55 (x−40) temperatura exterior
  *  5DE byte 0 bit 0x04 luces (dato del Smart EQ, misma plataforma; no está en CanZE)
  * Clima 744/764: 2121 26-35 (x−400)×0.1 temperatura interior
@@ -83,6 +85,7 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
     private var cellAt = 0L
     private var plugged: Boolean? = null
     private var chg: Double? = null
+    private var packV: Double? = null
     private var tires: Tires? = null
     private var avgCons: Double? = null
     private var avail: Double? = null
@@ -146,8 +149,15 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
                 if (b.size < 5) throw ElmException("respuesta corta")
                 Bits.get(b, (b.size - 2) * 8, b.size * 8 - 1).toInt()
             }?.let { answeredInCycle++; if (it <= 1000) range = it }
-            5 -> tryOr("222005") { Bits.field(elm.request(EVC_TX, EVC_RX, "222005"), 24, 39, 0.01, 0.0) }
-                ?.takeIf { it in 5.0..20.0 }?.let { v12 = it }
+            5 -> {
+                tryOr("222005") { Bits.field(elm.request(EVC_TX, EVC_RX, "222005"), 24, 39, 0.01, 0.0) }
+                    ?.takeIf { it in 5.0..20.0 }?.let { v12 = it }
+                // Voltaje del paquete, solo si está enchufado (para calcular la potencia real de carga).
+                if (plugged == true) {
+                    tryOr("223203") { Bits.field(elm.request(EVC_TX, EVC_RX, "223203"), 24, 39, 0.5, 0.0) }
+                        ?.takeIf { it in 200.0..450.0 }?.let { packV = it }
+                }
+            }
             6 -> tryOr("2121") { Bits.field(elm.request(HVAC_TX, HVAC_RX, "2121"), 26, 35, 0.1, 400.0) }
                 ?.takeIf { it in -40.0..80.0 }?.let { cabin = it }
             7 -> {
@@ -162,7 +172,9 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
                         val a = Bits.field(f, 52, 61, 0.1, 0.0)
                         if (a in 1.0..60.0) avgCons = a
                     }
-                    chg = if (plugged == true) tryOr("42E") { Bits.field(elm.freeFrame("42E", 500), 56, 63, 0.3, 0.0) } else null
+                    // Potencia que realmente entra = voltaje × corriente de la batería.
+                    // (La trama 42E es la potencia MÁXIMA que acepta la batería, no la que entra.)
+                    chg = if (plugged == true) chargePower() else null
                 }
             }
             8 -> {
@@ -207,12 +219,21 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
 
     /** Lecturas rápidas para la app abierta: velocidad y potencia. */
     fun fast(): Pair<Double?, Double?> {
-        // ×1,064: el velocímetro del tablero marca a propósito un poco más que la velocidad real (47 → 50).
+        // El velocímetro del tablero marca a propósito un poco más que la velocidad real.
+        // Ajuste medido en el carro: real 47 → tablero 50, real 86 → tablero 90.
         val sp = quiet { Bits.field(elm.freeFrame("5D7", 120), 0, 15, 0.01, 0.0) }
-            ?.takeIf { it < 250 }?.let { it * DASH_FACTOR }
+            ?.takeIf { it < 250 }?.let { toDash(it) }
         if (sp != null) { lastSpeed = sp; lastSpeedAt = System.currentTimeMillis() }
         val pw = quiet { Bits.field(elm.freeFrame("1FD", 120), 48, 55, 1.0, 80.0) }
         return sp to pw
+    }
+
+    /** kW entrando a la batería, desde voltaje y corriente; 0 si no está transfiriendo. */
+    private fun chargePower(): Double? {
+        val v = packV ?: return null
+        val i = current ?: return null
+        val kw = abs(v * i) / 1000.0
+        return if (kw < 0.8) 0.0 else kw // por debajo de ~0,8 kW es el consumo propio del carro, no carga
     }
 
     /** Presión en PSI desde la trama 673 (13,725 mbar por unidad). */
@@ -241,7 +262,11 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
         const val HVAC_RX = "764"
         const val SLOW_MS = 10 * 60_000L
         const val STEPS = 10
-        const val DASH_FACTOR = 1.064
+        const val DASH_K = 1.026
+        const val DASH_C = 1.8
+
+        /** Velocidad real → velocidad como la muestra el tablero (detenido sigue en 0). */
+        fun toDash(real: Double): Double = if (real < 2.0) real else real * DASH_K + DASH_C
     }
 }
 
