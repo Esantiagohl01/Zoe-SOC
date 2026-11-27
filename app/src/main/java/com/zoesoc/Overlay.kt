@@ -15,7 +15,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import kotlin.math.abs
-import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 /** Burbuja flotante arrastrable. Tocarla alterna entre vista completa (con carro) y compacta. */
@@ -103,7 +102,10 @@ class Overlay(private val ctx: Context) {
     }
 }
 
-/** Dibujo de la burbuja: carro + porcentaje, 8 barritas como el tablero y temperatura de la batería. */
+/**
+ * Dibujo de la burbuja: carro de lado en estilo "rayos X" con el paquete de batería bajo el piso,
+ * que se llena según el SOC, más el porcentaje y la temperatura de la batería.
+ */
 class BubbleView(ctx: Context) : View(ctx) {
     var soc: Double? = null
     var tempC: Double? = null
@@ -115,35 +117,45 @@ class BubbleView(ctx: Context) : View(ctx) {
     private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, dm)
 
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xD9111418.toInt() }
-    private val pctPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.DEFAULT_BOLD; textSize = sp(26f) }
+    private val pctPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.DEFAULT_BOLD; textSize = sp(28f) }
     private val smallPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFB8C0C8.toInt(); textSize = sp(12f) }
-    private val segPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val body = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFDDE3EA.toInt() }
-    private val glass = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF3A4450.toInt() }
-    private val tire = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF0E1114.toInt() }
-    private val hub = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF8A949E.toInt() }
 
-    private val lamp = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF9FD4FF.toInt() }
-    private val tail = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE24B4A.toInt() }
+    // Pinturas del carro (en unidades del dibujo de 90 × 40).
+    private val bodyFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x14FFFFFF }
+    private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeWidth = 1.3f; color = 0xFFC8D2DC.toInt()
+        strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
+    }
+    private val thin = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeWidth = 0.8f; color = 0x99C8D2DC.toInt()
+        strokeJoin = Paint.Join.ROUND
+    }
+    private val glassFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x1FFFFFFF }
+    private val packEmpty = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x26FFFFFF }
+    private val packFill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val packLine = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeWidth = 0.9f; color = 0xFFE6ECF2.toInt()
+    }
 
-    // Silueta corta y alta estilo Zoe (frente a la izquierda), dibujada en un espacio de 90 × 40.
+    // Silueta corta y alta, techo plano y cola recta (frente a la izquierda).
     private val carPath = Path().apply {
         moveTo(4f, 31f); lineTo(3f, 25f)
         quadTo(3f, 19f, 9f, 18f)                       // nariz redonda
         cubicTo(14f, 17f, 18f, 16f, 22f, 13f)          // capó corto
-        cubicTo(27f, 7f, 32f, 3f, 40f, 2.5f)           // parabrisas inclinado
-        cubicTo(55f, 1.5f, 68f, 2f, 76f, 5f)           // techo
-        cubicTo(82f, 7f, 85f, 11f, 86f, 18f)           // cola corta, casi vertical
-        lineTo(87f, 27f); quadTo(87f, 31f, 84f, 31f)
+        cubicTo(27f, 7f, 32f, 3.2f, 40f, 2.6f)         // parabrisas
+        lineTo(72f, 2.4f)                              // techo plano
+        quadTo(77f, 2.4f, 79f, 4.5f)                   // esquina trasera
+        lineTo(84f, 15f)                               // portón casi recto
+        lineTo(86f, 27f); quadTo(86f, 31f, 83f, 31f)
         close()
     }
     private val glassPath = Path().apply {
-        moveTo(26f, 14f); cubicTo(30f, 9f, 35f, 5.5f, 41f, 5f); lineTo(51f, 5f); lineTo(51f, 14f); close()
-        moveTo(54f, 14f); lineTo(54f, 5f); lineTo(65f, 5f); cubicTo(72f, 5.5f, 78f, 8f, 81f, 14f); close()
+        moveTo(26f, 14f); cubicTo(30f, 9f, 35f, 5.6f, 41f, 5.2f); lineTo(51f, 5.1f); lineTo(51f, 14f); close()
+        moveTo(54f, 14f); lineTo(54f, 5.1f); lineTo(71f, 5f); quadTo(75f, 5f, 77f, 7f); lineTo(80f, 14f); close()
     }
 
     private fun socColor(): Int {
-        val s = soc ?: return Color.WHITE
+        val s = soc ?: return 0xFFC8D2DC.toInt()
         return when {
             s < 20 -> 0xFFFF5252.toInt()
             s < 50 -> 0xFFFFC107.toInt()
@@ -152,9 +164,8 @@ class BubbleView(ctx: Context) : View(ctx) {
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val w = if (compact) 118f else 160f
-        // Completa: siempre deja una línea abajo (temperatura o estado). Compacta: solo si hay estado.
-        val h = if (compact) 60f + (if (status != "OK") 16f else 0f) else 80f
+        val w = if (compact) 100f else 210f
+        val h = if (compact) 48f + (if (status != "OK") 16f else 0f) else 64f
         setMeasuredDimension(dp(w).roundToInt(), dp(h).roundToInt())
     }
 
@@ -165,56 +176,51 @@ class BubbleView(ctx: Context) : View(ctx) {
         c.drawRoundRect(0f, 0f, w, h, dp(16f), dp(16f), bg)
 
         val col = socColor()
-        pctPaint.color = col
+        pctPaint.color = if (soc == null) Color.WHITE else col
         val pct = soc?.let { "${it.roundToInt()}%" } ?: "--%"
+        val sub = if (status != "OK") status.take(if (compact) 14 else 16)
+        else tempC?.let { "Batería ${it.roundToInt()} °C" } ?: ""
 
-        val barsTop: Float
         if (compact) {
-            c.drawText(pct, pad, dp(34f), pctPaint)
-            barsTop = dp(42f)
+            c.drawText(pct, pad, dp(36f), pctPaint)
+            if (status != "OK") c.drawText(sub, pad, dp(56f), smallPaint)
         } else {
-            drawCar(c, pad + dp(2f), dp(11f), dp(52f))
-            c.drawText(pct, pad + dp(66f), dp(36f), pctPaint)
-            barsTop = dp(46f)
-        }
-        drawBars(c, pad, barsTop, w - pad, barsTop + dp(9f), col)
-
-        val lineY = barsTop + dp(23f)
-        if (status != "OK") {
-            c.drawText(status.take(if (compact) 16 else 24), pad, lineY, smallPaint)
-        } else if (!compact) {
-            val t = tempC
-            if (t != null) c.drawText("Batería ${t.roundToInt()} °C", pad, lineY, smallPaint)
+            drawCar(c, pad, dp(9f), dp(104f), col)
+            val x = pad + dp(110f)
+            c.drawText(pct, x, dp(35f), pctPaint)
+            if (sub.isNotEmpty()) c.drawText(sub, x, dp(53f), smallPaint)
         }
     }
 
-    private fun drawCar(c: Canvas, x: Float, y: Float, width: Float) {
+    private fun drawCar(c: Canvas, x: Float, y: Float, width: Float, col: Int) {
         val k = width / 90f
         c.save()
         c.translate(x, y)
         c.scale(k, k)
-        c.drawPath(carPath, body)
-        c.drawPath(glassPath, glass)
-        c.drawOval(4.5f, 19.5f, 11.5f, 22.5f, lamp)
-        c.drawRoundRect(84.5f, 14f, 86.5f, 19f, 1f, 1f, tail)
+        // carrocería transparente
+        c.drawPath(carPath, bodyFill)
+        c.drawPath(glassPath, glassFill)
+        c.drawPath(glassPath, thin)
+        // línea del piso y motor adelante
+        c.drawLine(28f, 23f, 62f, 23f, thin)
+        c.drawRoundRect(9f, 21.5f, 16f, 26.5f, 1.2f, 1.2f, thin)
+        // paquete de batería bajo el piso, lleno según el SOC
+        val l = 27f; val r = 63f; val t = 24.2f; val b = 29.8f
+        c.drawRoundRect(l, t, r, b, 1.2f, 1.2f, packEmpty)
+        val s = soc
+        if (s != null) {
+            val fr = l + (r - l) * (s.coerceIn(0.0, 100.0) / 100.0).toFloat()
+            packFill.color = col
+            c.drawRoundRect(l, t, fr, b, 1.2f, 1.2f, packFill)
+        }
+        c.drawRoundRect(l, t, r, b, 1.2f, 1.2f, packLine)
+        // contorno y ruedas
+        c.drawPath(carPath, line)
         for (cx in floatArrayOf(19f, 71f)) {
-            c.drawCircle(cx, 31f, 8.5f, tire)
-            c.drawCircle(cx, 31f, 3.8f, hub)
+            c.drawCircle(cx, 31f, 7.8f, bg)
+            c.drawCircle(cx, 31f, 7.8f, line)
+            c.drawCircle(cx, 31f, 4.2f, thin)
         }
         c.restore()
-    }
-
-    /** 8 segmentos, igual que el tablero del Zoe: 35 % → 3 encendidos. */
-    private fun drawBars(c: Canvas, left: Float, top: Float, right: Float, bottom: Float, col: Int) {
-        val n = 8
-        val gap = dp(3f)
-        val segW = (right - left - gap * (n - 1)) / n
-        val on = soc?.let { ceil(it / 12.5).toInt().coerceIn(0, n) } ?: 0
-        val r = dp(2f)
-        for (i in 0 until n) {
-            val l = left + i * (segW + gap)
-            segPaint.color = if (i < on) col else 0x33FFFFFF
-            c.drawRoundRect(l, top, l + segW, bottom, r, r, segPaint)
-        }
     }
 }

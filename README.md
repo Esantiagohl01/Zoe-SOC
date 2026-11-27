@@ -13,7 +13,7 @@ Solo lee datos. No escribe nada en los módulos del carro.
   - Temperatura promedio de la batería
   - Corriente
   - Autonomía
-- Muestra en una burbuja arrastrable, encima de cualquier app (también AutoKit): un carro, el SOC y 8 barritas como las del tablero. Si la tocas, pasa a modo compacto (solo % y barritas).
+- Muestra en una burbuja arrastrable, encima de cualquier app (también AutoKit): un carro de lado tipo rayos X con la batería bajo el piso llenándose según la carga, el SOC y la temperatura de la batería. Si la tocas, pasa a modo compacto (solo el %).
 - También trae un widget, por si el launcher del Tbox los soporta.
 - Arranca sola al encender la caja (se puede desactivar).
 - Si el carro está apagado, reintenta cada 20 s. Si se pierde el Bluetooth, reconecta cada 10 s.
