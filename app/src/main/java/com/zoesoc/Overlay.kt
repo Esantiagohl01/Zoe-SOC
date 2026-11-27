@@ -51,6 +51,7 @@ class Overlay(private val ctx: Context) {
     fun update(d: ZoeData?, status: String) {
         val v = view ?: return
         v.soc = d?.displaySoc
+        v.tempC = d?.tempC
         if (v.status != status && (v.status == "OK" || status == "OK")) v.requestLayout()
         v.status = status
         v.alpha = if (d == null || System.currentTimeMillis() - d.time > 120_000) 0.6f else 1f
@@ -102,9 +103,10 @@ class Overlay(private val ctx: Context) {
     }
 }
 
-/** Dibujo de la burbuja: carro + porcentaje y 8 barritas como el tablero. */
+/** Dibujo de la burbuja: carro + porcentaje, 8 barritas como el tablero y temperatura de la batería. */
 class BubbleView(ctx: Context) : View(ctx) {
     var soc: Double? = null
+    var tempC: Double? = null
     var status: String = ""
     var compact = false
 
@@ -114,22 +116,30 @@ class BubbleView(ctx: Context) : View(ctx) {
 
     private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xD9111418.toInt() }
     private val pctPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.DEFAULT_BOLD; textSize = sp(26f) }
-    private val smallPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFB8C0C8.toInt(); textSize = sp(11f) }
+    private val smallPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFB8C0C8.toInt(); textSize = sp(12f) }
     private val segPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val body = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFDDE3EA.toInt() }
     private val glass = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF3A4450.toInt() }
     private val tire = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF0E1114.toInt() }
     private val hub = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF8A949E.toInt() }
 
-    // Silueta de un hatchback pequeño, dibujada en un espacio de 100 × 40.
+    private val lamp = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF9FD4FF.toInt() }
+    private val tail = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE24B4A.toInt() }
+
+    // Silueta redondeada estilo Zoe (frente a la izquierda), dibujada en un espacio de 100 × 40.
     private val carPath = Path().apply {
-        moveTo(3f, 30f); lineTo(3f, 23f); quadTo(4f, 18f, 12f, 17f); lineTo(27f, 15f)
-        lineTo(39f, 6f); quadTo(42f, 4f, 47f, 4f); lineTo(73f, 4f); quadTo(80f, 4f, 84f, 9f)
-        lineTo(93f, 17f); quadTo(98f, 19f, 98f, 24f); lineTo(98f, 30f); close()
+        moveTo(4f, 31f); lineTo(3f, 26f)
+        quadTo(3f, 19f, 9f, 18f)                       // nariz redonda
+        cubicTo(16f, 17f, 20f, 16f, 24f, 13f)          // capó corto
+        cubicTo(30f, 8f, 36f, 3.5f, 44f, 3f)           // parabrisas muy inclinado
+        cubicTo(60f, 1f, 76f, 1.5f, 85f, 7f)           // techo en arco
+        quadTo(93f, 11f, 95f, 20f)                     // portón trasero curvo
+        lineTo(97f, 27f); quadTo(97f, 31f, 94f, 31f)
+        close()
     }
     private val glassPath = Path().apply {
-        moveTo(31f, 15f); lineTo(41f, 8f); quadTo(43f, 7f, 46f, 7f); lineTo(57f, 7f); lineTo(57f, 15f); close()
-        moveTo(60f, 15f); lineTo(60f, 7f); lineTo(72f, 7f); quadTo(77f, 7f, 80f, 10f); lineTo(85f, 15f); close()
+        moveTo(28f, 15f); cubicTo(33f, 10f, 38f, 6.5f, 45f, 6f); lineTo(57f, 5.6f); lineTo(57f, 15f); close()
+        moveTo(60f, 15f); lineTo(60f, 5.6f); lineTo(72f, 5.8f); cubicTo(79f, 6.5f, 84f, 9.5f, 87f, 15f); close()
     }
 
     private fun socColor(): Int {
@@ -143,7 +153,8 @@ class BubbleView(ctx: Context) : View(ctx) {
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = if (compact) 118f else 160f
-        val h = (if (compact) 60f else 64f) + (if (status != "OK") 16f else 0f)
+        // Completa: siempre deja una línea abajo (temperatura o estado). Compacta: solo si hay estado.
+        val h = if (compact) 60f + (if (status != "OK") 16f else 0f) else 80f
         setMeasuredDimension(dp(w).roundToInt(), dp(h).roundToInt())
     }
 
@@ -168,8 +179,12 @@ class BubbleView(ctx: Context) : View(ctx) {
         }
         drawBars(c, pad, barsTop, w - pad, barsTop + dp(9f), col)
 
+        val lineY = barsTop + dp(23f)
         if (status != "OK") {
-            c.drawText(status.take(if (compact) 16 else 24), pad, barsTop + dp(23f), smallPaint)
+            c.drawText(status.take(if (compact) 16 else 24), pad, lineY, smallPaint)
+        } else if (!compact) {
+            val t = tempC
+            if (t != null) c.drawText("Batería ${t.roundToInt()} °C", pad, lineY, smallPaint)
         }
     }
 
@@ -180,9 +195,11 @@ class BubbleView(ctx: Context) : View(ctx) {
         c.scale(k, k)
         c.drawPath(carPath, body)
         c.drawPath(glassPath, glass)
-        for (cx in floatArrayOf(23f, 77f)) {
-            c.drawCircle(cx, 30f, 8f, tire)
-            c.drawCircle(cx, 30f, 3.5f, hub)
+        c.drawOval(4.5f, 19.5f, 12f, 22.5f, lamp)
+        c.drawRoundRect(93.5f, 16f, 96f, 21f, 1f, 1f, tail)
+        for (cx in floatArrayOf(21f, 79f)) {
+            c.drawCircle(cx, 31f, 8.5f, tire)
+            c.drawCircle(cx, 31f, 3.8f, hub)
         }
         c.restore()
     }
