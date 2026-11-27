@@ -26,6 +26,10 @@ data class ZoeData(
     val cabinTemp: Double? = null,      // temperatura dentro del carro
     val climOn: Boolean? = null,        // climatizador funcionando
     val lightsOn: Boolean? = null,      // luces (null = no se pudo leer)
+    val tripRawKm: Double? = null,      // contador de distancia de viaje del carro (EVC 2233DE)
+    val tripRawKwh: Double? = null,     // contador de energía de viaje del carro (EVC 2233DD)
+    val tripKm: Double? = null,         // km desde que se prendió el carro (calculado)
+    val tripKwh: Double? = null,        // kWh desde que se prendió el carro (calculado)
     val speedKmh: Double? = null,       // velocidad (solo con la app abierta)
     val powerKw: Double? = null,        // potencia instantánea (+ consume, − regenera)
     val time: Long = System.currentTimeMillis(),
@@ -68,6 +72,7 @@ data class ZoeData(
  *  656 48-55 (x−40) temperatura exterior
  *  5DE byte 0 bit 0x04 luces (dato del Smart EQ, misma plataforma; no está en CanZE)
  * Clima 744/764: 2121 26-35 (x−400)×0.1 temperatura interior
+ * Viaje (EVC): 2233DE 24-55 ×0.0001 km · 2233DD 24-47 ×0.001 kWh
  */
 class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
     // Último valor bueno de cada dato: si una lectura falla, se conserva el anterior (no parpadea).
@@ -91,6 +96,8 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
     private var avail: Double? = null
     private var ext: Double? = null
     private var lights: Boolean? = null
+    private var tripKmRaw: Double? = null
+    private var tripKwhRaw: Double? = null
 
     private var stepIdx = 0
     private var lastSpeed: Double? = null
@@ -144,11 +151,18 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
                     tryOr("celdas") { cellSpread() }?.let { cellDiff = it; cellAt = now }
                 }
             }
-            4 -> tryOr("223451") {
-                val b = elm.request(EVC_TX, EVC_RX, "223451")
-                if (b.size < 5) throw ElmException("respuesta corta")
-                Bits.get(b, (b.size - 2) * 8, b.size * 8 - 1).toInt()
-            }?.let { answeredInCycle++; if (it <= 1000) range = it }
+            4 -> {
+                tryOr("223451") {
+                    val b = elm.request(EVC_TX, EVC_RX, "223451")
+                    if (b.size < 5) throw ElmException("respuesta corta")
+                    Bits.get(b, (b.size - 2) * 8, b.size * 8 - 1).toInt()
+                }?.let { answeredInCycle++; if (it <= 1000) range = it }
+                // Contadores del computador de viaje del carro (para el bloque "Viaje").
+                tryOr("2233DE") { Bits.field(elm.request(EVC_TX, EVC_RX, "2233DE"), 24, 55, 0.0001, 0.0) }
+                    ?.takeIf { it in 0.0..1_000_000.0 }?.let { tripKmRaw = it }
+                tryOr("2233DD") { Bits.field(elm.request(EVC_TX, EVC_RX, "2233DD"), 24, 47, 0.001, 0.0) }
+                    ?.takeIf { it in 0.0..100_000.0 }?.let { tripKwhRaw = it }
+            }
             5 -> {
                 tryOr("222005") { Bits.field(elm.request(EVC_TX, EVC_RX, "222005"), 24, 39, 0.01, 0.0) }
                     ?.takeIf { it in 5.0..20.0 }?.let { v12 = it }
@@ -219,7 +233,23 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
         v12 = v12, cellDiffMv = cellDiff, plugged = plugged, chargingKw = chg,
         availKwh = avail, avgConsumption = avgCons, tires = tires,
         extTemp = ext, cabinTemp = cabin, climOn = null, lightsOn = lights,
+        tripRawKm = tripKmRaw, tripRawKwh = tripKwhRaw,
     )
+
+    /**
+     * Chequeo del modo reposo: solo ESCUCHA el bus, nunca transmite si el carro está dormido
+     * (transmitir despertaría a todos los módulos). Devuelve true si hay que volver a leer:
+     * el carro anda, o está enchufado y entrando corriente.
+     */
+    fun restCheck(): Boolean {
+        val f = quiet { elm.freeFrame("5D7", 300) } ?: return false // bus dormido: nada que hacer
+        if (toDash(Bits.field(f, 0, 15, 0.01, 0.0)) > 1.0) return true
+        val p = quiet { elm.freeFrame("654", 700) } ?: return false
+        if (Bits.get(p, 2, 2) != 1L) return false
+        // El bus ya está despierto y hay cable conectado: una sola consulta para ver si entra corriente.
+        val b = quiet { elm.request(LBC_TX, LBC_RX, "2101") } ?: return false
+        return abs(Bits.field(b, 16, 31, 0.1, 5000.0)) > 3.0
+    }
 
     /** Lecturas rápidas para la app abierta: velocidad y potencia. */
     fun fast(): Pair<Double?, Double?> {

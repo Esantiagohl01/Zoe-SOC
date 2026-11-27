@@ -31,9 +31,12 @@ class DashView(ctx: Context) : View(ctx) {
     private var data: ZoeData? = null
     private var status = ""
 
+    private val limiter = SpeedLimiter(prefs)
+
     fun update(d: ZoeData?, st: String) {
         data = d
         status = st
+        limiter.update(if (d?.charging == true) null else speed(d))
         invalidate()
     }
 
@@ -142,11 +145,9 @@ class DashView(ctx: Context) : View(ctx) {
         c.restore()
         // Un solo temporizador (no se acumulan): animación de carga o segundero del reloj.
         // Un solo temporizador: animación de carga, o cambio de minuto del reloj.
+        // Un solo temporizador, solo para animaciones (carga o señal parpadeando).
         removeCallbacks(tick)
-        if (page == 0) {
-            val toNextMinute = 60_000L - TimeFix.now() % 60_000L + 50L
-            postDelayed(tick, if (d?.charging == true) 50L else toNextMinute)
-        }
+        if (page == 0 && (d?.charging == true || limiter.over)) postDelayed(tick, 50L)
     }
 
     private fun drawHeader(c: Canvas, d: ZoeData?) {
@@ -169,10 +170,34 @@ class DashView(ctx: Context) : View(ctx) {
         }
     }
 
-    /** Teléfono blanco encima de la casita: abre AutoKit (CarPlay). */
+    /** Señal de límite (toque para cambiar: Auto → 50 → 80 → apagado). Parpadea suave si te pasas. */
+    private fun drawLimitSign(c: Canvas) {
+        val lim = limiter.limit
+        val cx = SIGN_X; val cy = SIGN_Y; val r = 44f
+        if (lim == null) {
+            line.color = 0xFF3A4048.toInt(); line.strokeWidth = 6f
+            c.drawCircle(cx, cy, r, line)
+            txt(c, "sin", cx, cy - 4, 24f, dimC, align = Paint.Align.CENTER)
+            txt(c, "límite", cx, cy + 22, 22f, dimC, align = Paint.Align.CENTER)
+            return
+        }
+        val a = if (limiter.over) {
+            val t = (System.currentTimeMillis() % 1000L) / 1000.0
+            (120 + 135 * (0.5 + 0.5 * cos(t * 2 * Math.PI))).toInt()
+        } else 255
+        fill.color = 0xFFFFFFFF.toInt(); fill.alpha = a
+        c.drawCircle(cx, cy, r, fill)
+        line.color = 0xFFE53935.toInt(); line.alpha = a; line.strokeWidth = 11f
+        c.drawCircle(cx, cy - 0f, r - 5f, line)
+        line.alpha = 255; fill.alpha = 255
+        txt(c, lim.toString(), cx, cy + 14, 40f, 0xFF111111.toInt(), true, Paint.Align.CENTER)
+        if (limiter.mode == SpeedLimiter.AUTO) txt(c, "AUTO", cx, cy + r + 22, 20f, dimC, true, Paint.Align.CENTER)
+    }
+
+    /** Teléfono blanco abajo, al otro lado del carro (a espejo de la casita): abre AutoKit (CarPlay). */
     private fun drawAutoKit(c: Canvas) {
-        if (!hasAutoKit) return
-        val x = 50f; val y = 474f
+        if (!hasAutoKit || page != 0) return // en Detalle el carro ocupa ese lugar
+        val x = PHONE_X; val y = 548f
         fill.color = textC
         c.drawRoundRect(x - 16, y - 26, x + 16, y + 26, 8f, 8f, fill)
         fill.color = bgC
@@ -205,7 +230,7 @@ class DashView(ctx: Context) : View(ctx) {
         val charging = d?.charging == true
         // Columna izquierda: reloj analógico arriba y carro más pequeño pegado abajo.
         val colX = 235f
-        drawDigitalClock(c, colX)
+        drawTrip(c, colX, d)
         val carH = 322f
         val carW = carH * CarArt.W / CarArt.H
         val carTop = 574f - carH
@@ -260,8 +285,9 @@ class DashView(ctx: Context) : View(ctx) {
         } else {
             val sp = speed(d)
             val st = sp?.let { Fmt.f(it, 0) } ?: "--"
-            txt(c, st, x0, 400f, 116f, textC, true)
+            txt(c, st, x0, 400f, 116f, if (limiter.over) Colors.AMBER else textC, true)
             txt(c, "km/h", x0 + tw(st, 116f, true) + 12f, 400f, 34f, dimC)
+            drawLimitSign(c)
             val pw = power(d)
             txt(c, "regen", bx0, 456f, 30f, Colors.GREEN, true)
             txt(c, pw?.let { Fmt.f(it, 1) + " kW" } ?: "-- kW", bx1, 456f, 30f, textC, true, Paint.Align.RIGHT)
@@ -349,17 +375,19 @@ class DashView(ctx: Context) : View(ctx) {
         txt(c, "Exterior " + Fmt.temp(d?.extTemp) + " · Interior " + Fmt.temp(d?.cabinTemp), 660f, 488f, 24f, dimC)
     }
 
-    /** Reloj digital grande con la fecha (hora de Bogotá, corregida con GPS o internet). */
-    private fun drawDigitalClock(c: Canvas, cx: Float) {
-        val now = java.util.Date(TimeFix.now())
-        val es = java.util.Locale("es", "CO")
-        val tz = java.util.TimeZone.getTimeZone("America/Bogota")
-        val hh = java.text.SimpleDateFormat("HH:mm", es).apply { timeZone = tz }.format(now)
-        val day = java.text.SimpleDateFormat("EEE d MMM", es).apply { timeZone = tz }.format(now).replace(".", "")
-        // Tenue mientras no se haya confirmado la hora (recién encendido, sin GPS ni internet).
-        val col = if (TimeFix.synced) textC else 0xFF4A525B.toInt()
-        txt(c, hh, cx, 150f, 100f, col, true, Paint.Align.CENTER)
-        txt(c, if (TimeFix.synced) day else "sincronizando hora…", cx, 192f, 26f, dimC, align = Paint.Align.CENTER)
+    /** Bloque "Viaje": km grandes y, debajo, kWh y consumo del viaje (desde que se prendió el carro). */
+    private fun drawTrip(c: Canvas, cx: Float, d: ZoeData?) {
+        txt(c, "Viaje", cx, 84f, 26f, dimC, align = Paint.Align.CENTER)
+        val km = d?.tripKm
+        val kStr = km?.let { Fmt.f(it, 1) } ?: "--"
+        val wNum = tw(kStr, 84f, true); val wUnit = tw(" km", 34f, false)
+        val x = cx - (wNum + wUnit) / 2
+        txt(c, kStr, x, 163f, 84f, textC, true)
+        txt(c, " km", x + wNum, 163f, 34f, 0xFFC8D0D8.toInt())
+        val kwh = d?.tripKwh
+        val cons = if (km != null && kwh != null && km >= 0.5) Fmt.f(kwh / km * 100, 1) else "--"
+        val line2 = (kwh?.let { Fmt.f(it, 1) } ?: "--") + " kWh · " + cons + " kWh/100"
+        txt(c, line2, cx, 208f, 28f, 0xFFC8D0D8.toInt(), align = Paint.Align.CENTER)
     }
 
     /** Presiones junto a cada llanta, por fuera del carro (izquierda alineada hacia el carro). */
@@ -393,8 +421,9 @@ class DashView(ctx: Context) : View(ctx) {
             val y = (e.y - oy) / sc
             when {
                 x > 900 && y < 90 -> onSettings?.invoke()
+                page == 0 && data?.charging != true && abs(x - SIGN_X) < 60 && abs(y - SIGN_Y) < 60 -> { limiter.cycle(); invalidate() }
                 x < 110 && y > 515 -> onHome?.invoke()
-                x < 110 && y in 440f..515f && hasAutoKit -> onAutoKit?.invoke()
+                page == 0 && hasAutoKit && x in (PHONE_X - 45f)..(PHONE_X + 45f) && y > 505 -> onAutoKit?.invoke()
                 y > 560 && x in 420f..580f -> go(if (x < 500) -1 else 1) // tocar los puntitos también cambia
             }
             return true
@@ -407,7 +436,14 @@ class DashView(ctx: Context) : View(ctx) {
         invalidate()
     }
 
-    companion object { const val PAGES = 2 }
+    companion object {
+        const val PAGES = 2
+        /** Posición del teléfono: a la derecha del carro, a la misma altura que la casita. */
+        const val PHONE_X = 418f
+        /** Señal del limitador, a la derecha de la velocidad. */
+        const val SIGN_X = 892f
+        const val SIGN_Y = 358f
+    }
 
     override fun onTouchEvent(event: MotionEvent): Boolean = gestures.onTouchEvent(event) || super.onTouchEvent(event)
 }

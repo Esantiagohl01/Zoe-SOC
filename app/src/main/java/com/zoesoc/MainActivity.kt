@@ -58,7 +58,6 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (prefs.address != null && !ZoeService.running && Perms.hasBt(this)) ZoeService.start(this)
-        startGpsTime()
     }
 
     @Suppress("DEPRECATION")
@@ -75,47 +74,8 @@ class MainActivity : Activity() {
         if (hasFocus) immersive()
     }
 
-    // ---------- hora correcta (GPS e internet) ----------
-    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
-    private val retryInternet = object : Runnable {
-        override fun run() {
-            TimeFix.fetchInternet { runOnUiThread { dash.invalidate() } }
-            if (!TimeFix.synced) handler.postDelayed(this, 60_000L)
-        }
-    }
-    private val gps = object : android.location.LocationListener {
-        override fun onLocationChanged(l: android.location.Location) {
-            // Hora del GPS ajustada por el tiempo transcurrido desde la lectura.
-            val age = (android.os.SystemClock.elapsedRealtimeNanos() - l.elapsedRealtimeNanos) / 1_000_000L
-            TimeFix.fromGps(l.time + age)
-            dash.invalidate()
-        }
-        @Deprecated("Android 9 o menos")
-        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
-        override fun onProviderEnabled(provider: String) {}
-        override fun onProviderDisabled(provider: String) {}
-    }
-
-    @android.annotation.SuppressLint("MissingPermission")
-    private fun startGpsTime() {
-        if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) != android.content.pm.PackageManager.PERMISSION_GRANTED) return
-        val lm = getSystemService(android.location.LocationManager::class.java) ?: return
-        try {
-            if (lm.allProviders.contains(android.location.LocationManager.GPS_PROVIDER)) {
-                lm.requestLocationUpdates(android.location.LocationManager.GPS_PROVIDER, 10_000L, 0f, gps, android.os.Looper.getMainLooper())
-            }
-        } catch (e: Exception) { }
-    }
-
-    private fun stopGpsTime() {
-        try { getSystemService(android.location.LocationManager::class.java)?.removeUpdates(gps) } catch (e: Exception) { }
-    }
-
     override fun onResume() {
         super.onResume()
-        handler.removeCallbacks(retryInternet)
-        handler.post(retryInternet)
-        startGpsTime()
         ZoeState.appVisible = true
         ZoeState.touch() // oculta la burbuja
         ZoeState.addListener(listener)
@@ -123,8 +83,6 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
-        handler.removeCallbacks(retryInternet)
-        stopGpsTime()
         ZoeState.appVisible = false
         ZoeState.touch() // vuelve a mostrar la burbuja
         ZoeState.removeListener(listener)

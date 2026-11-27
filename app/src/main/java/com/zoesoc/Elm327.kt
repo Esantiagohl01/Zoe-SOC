@@ -20,7 +20,8 @@ class Elm327(private val t: Transport, private val log: (String) -> Unit) {
     fun init() {
         cmd("ATZ", 5000)
         Thread.sleep(300)
-        for (c in listOf("ATE0", "ATL0", "ATS0", "ATH0", "ATAT1", "ATSP6", "ATCAF1")) {
+        // ATCSM1: al escuchar tramas el scanner queda en silencio total (no transmite nada al bus).
+        for (c in listOf("ATE0", "ATL0", "ATS0", "ATH0", "ATAT1", "ATSP6", "ATCAF1", "ATCSM1")) {
             val r = cmd(c)
             if (!r.contains("OK")) log("$c → ${clean(r)}")
         }

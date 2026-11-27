@@ -95,6 +95,10 @@ class Prefs(ctx: Context) {
     var lightsMode: Int
         get() = p.getInt("lightsMode", 0)
         set(v) = p.edit().putInt("lightsMode", v).apply()
+    /** Limitador: 0 automático, 1 = 50, 2 = 80, 3 = apagado. */
+    var limitMode: Int
+        get() = p.getInt("limitMode", 0)
+        set(v) = p.edit().putInt("limitMode", v).apply()
     /** Pantalla de la app: 0 Digital, 1 Detalle. */
     var page: Int
         get() = p.getInt("page2", 0)
@@ -153,4 +157,40 @@ object History {
 
     fun startHour(p: Prefs): String? =
         if (p.chgStartTime == 0L) null else SimpleDateFormat("HH:mm", Locale.US).format(Date(p.chgStartTime))
+}
+
+/**
+ * Viaje desde que se prendió el carro: diferencia de los contadores de viaje del carro
+ * respecto al valor que tenían al arrancar. Si el contador se reinicia en el tablero, se acumula lo que llevaba.
+ */
+object ZoeTrip {
+    private var baseKm: Double? = null
+    private var lastKm: Double? = null
+    private var accKm = 0.0
+    private var baseKwh: Double? = null
+    private var lastKwh: Double? = null
+    private var accKwh = 0.0
+
+    @Synchronized fun reset() {
+        baseKm = null; lastKm = null; accKm = 0.0
+        baseKwh = null; lastKwh = null; accKwh = 0.0
+    }
+
+    @Synchronized fun apply(d: ZoeData): ZoeData {
+        val km = d.tripRawKm?.let { raw ->
+            if (baseKm == null) baseKm = raw
+            val l = lastKm
+            if (l != null && raw < l - 0.05) { accKm += l - (baseKm ?: l); baseKm = raw }
+            lastKm = raw
+            accKm + raw - (baseKm ?: raw)
+        }
+        val kwh = d.tripRawKwh?.let { raw ->
+            if (baseKwh == null) baseKwh = raw
+            val l = lastKwh
+            if (l != null && raw < l - 0.01) { accKwh += l - (baseKwh ?: l); baseKwh = raw }
+            lastKwh = raw
+            accKwh + raw - (baseKwh ?: raw)
+        }
+        return d.copy(tripKm = km, tripKwh = kwh)
+    }
 }

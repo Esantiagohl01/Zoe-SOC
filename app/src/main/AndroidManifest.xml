@@ -4,11 +4,7 @@
     <!-- Bluetooth clásico (Android 11 o menos) -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <!-- Ubicación: Bluetooth en Android 11 o menos, y la hora exacta del GPS para el reloj. -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <!-- Internet: solo para tomar la hora correcta si el Tbox tiene datos. -->
-    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
     <!-- Bluetooth Android 12+ -->
     <uses-permission
         android:name="android.permission.BLUETOOTH_SCAN"

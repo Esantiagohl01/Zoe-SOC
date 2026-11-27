@@ -40,6 +40,7 @@ class ZoeService : Service() {
             return
         }
         running = true
+        ZoeTrip.reset() // el Tbox acaba de arrancar con el carro: viaje nuevo
         ZoeState.addListener(listener)
         worker = thread(name = "zoe-worker") { loop() }
         onState()
@@ -80,10 +81,17 @@ class ZoeService : Service() {
                 var fastTime = 0L
                 var lastFull = 0L
                 var fastTurn = 0
-                fun withLive(d: ZoeData) = d.copy(speedKmh = speed, powerKw = power, fastTime = fastTime)
+                var resting = false
+                var lowCount = 0
+                var restStart = 0L
+                fun withLive(d: ZoeData) = ZoeTrip.apply(d.copy(speedKmh = speed, powerKw = power, fastTime = fastTime))
                 while (running) {
                     try {
                         if (ZoeState.appVisible) {
+                            if (resting) { // con la app abierta siempre se lee
+                                if (System.currentTimeMillis() - restStart > 10 * 60_000L) ZoeTrip.reset()
+                                resting = false; lowCount = 0
+                            }
                             // Cargando: no se lee velocidad ni potencia (no se usan); solo la batería.
                             val charging = reader.snapshot().charging
                             if (!charging) {
@@ -102,12 +110,34 @@ class ZoeService : Service() {
                             ZoeState.publish(d, "OK")
                             if (!pause(if (charging) 300L else 60L)) break
                         } else {
+                            // Modo reposo: el carro está apagado; no se le pregunta nada para que pueda dormirse.
+                            if (resting) {
+                                if (reader.restCheck()) {
+                                    resting = false; lowCount = 0; lastFull = 0L
+                                    // Apagado más de 10 minutos: empieza un viaje nuevo.
+                                    if (System.currentTimeMillis() - restStart > 10 * 60_000L) ZoeTrip.reset()
+                                    ZoeState.log("Fin del reposo: el carro se activó")
+                                } else {
+                                    if (!waitRest()) break
+                                    continue
+                                }
+                            }
                             // Solo la burbuja: lectura completa cada 10 s.
                             if (System.currentTimeMillis() - lastFull >= FULL_MS) {
                                 val d = withLive(reader.read())
                                 lastFull = System.currentTimeMillis()
                                 History.onData(this, d)
-                                ZoeState.publish(d, "OK")
+                                // Carro apagado = sin carga y 12 V por debajo de 13 V (el DC-DC ya se apagó).
+                                val off = !d.charging && (d.v12 ?: 14.0) < 13.0
+                                lowCount = if (off) lowCount + 1 else 0
+                                if (lowCount >= 3) {
+                                    resting = true
+                                    restStart = System.currentTimeMillis()
+                                    ZoeState.log("Carro apagado: modo reposo (sin consultas)")
+                                    ZoeState.publish(d, "En reposo")
+                                } else {
+                                    ZoeState.publish(d, "OK")
+                                }
                             }
                             if (!pause(500)) break
                         }
@@ -131,6 +161,15 @@ class ZoeService : Service() {
                 transport = null
             }
         }
+    }
+
+    /** Espera 5 s en reposo (escuchar no transmite nada), saliendo antes si se abre la app. */
+    private fun waitRest(): Boolean {
+        for (i in 0 until 5) {
+            if (ZoeState.appVisible) return true
+            if (!pause(1000)) return false
+        }
+        return true
     }
 
     /** Espera; devuelve false si el servicio se detuvo. */
