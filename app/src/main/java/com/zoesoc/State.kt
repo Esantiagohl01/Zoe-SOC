@@ -16,6 +16,9 @@ object ZoeState {
     @Volatile var status: String = "Detenido"
         private set
 
+    /** true mientras la pantalla de la app está abierta: activa las lecturas rápidas (velocidad, potencia). */
+    @Volatile var appVisible = false
+
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
     private val main = Handler(Looper.getMainLooper())
     private val logLines = ArrayDeque<String>()
@@ -67,6 +70,9 @@ class Prefs(ctx: Context) {
     var intervalSec: Int
         get() = p.getInt("interval", 15)
         set(v) = p.edit().putInt("interval", v).apply()
+    var refPsi: Int
+        get() = p.getInt("refPsi", 35)
+        set(v) = p.edit().putInt("refPsi", v).apply()
     var compact: Boolean
         get() = p.getBoolean("compact", false)
         set(v) = p.edit().putBoolean("compact", v).apply()
@@ -76,4 +82,42 @@ class Prefs(ctx: Context) {
     var bubbleY: Int
         get() = p.getInt("by", 120)
         set(v) = p.edit().putInt("by", v).apply()
+
+    /** Historial del SOH: un punto por día, "aaaa-mm-dd=83.0;...". */
+    var sohHistory: List<Pair<String, Double>>
+        get() = (p.getString("sohHist", "") ?: "").split(';').mapNotNull {
+            val kv = it.split('=')
+            if (kv.size == 2) kv[1].toDoubleOrNull()?.let { v -> kv[0] to v } else null
+        }
+        set(v) = p.edit().putString("sohHist", v.joinToString(";") { "${it.first}=${it.second}" }).apply()
+
+    var chargeStartSoc: Float
+        get() = p.getFloat("chgStart", -1f)
+        set(v) = p.edit().putFloat("chgStart", v).apply()
+    var lastCharge: String?
+        get() = p.getString("lastCharge", null)
+        set(v) = p.edit().putString("lastCharge", v).apply()
+}
+
+/** Guarda el SOH diario y detecta el inicio y fin de cada carga. */
+object History {
+    fun onData(ctx: Context, d: ZoeData) {
+        val p = Prefs(ctx)
+        d.soh?.let { soh ->
+            val day = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+            val list = p.sohHistory
+            if (list.lastOrNull()?.first != day) p.sohHistory = (list + (day to soh)).takeLast(365)
+        }
+        val s = d.displaySoc ?: return
+        val start = p.chargeStartSoc
+        if (d.charging && start < 0f) {
+            p.chargeStartSoc = s.toFloat()
+        } else if (!d.charging && d.plugged != null && start >= 0f) {
+            if (s - start >= 1) {
+                val day = SimpleDateFormat("dd/MM", Locale.US).format(Date())
+                p.lastCharge = "$day · ${start.toInt()}→${s.toInt()} %"
+            }
+            p.chargeStartSoc = -1f
+        }
+    }
 }
