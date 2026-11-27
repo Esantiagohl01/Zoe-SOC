@@ -31,7 +31,7 @@ class SocWidget : AppWidgetProvider() {
                 when {
                     v == null -> Color.WHITE
                     v < 20 -> 0xFFFF5252.toInt()
-                    v < 50 -> 0xFFFFC107.toInt()
+                    v < 30 -> 0xFFFFC107.toInt()
                     else -> 0xFF69F0AE.toInt()
                 },
             )
