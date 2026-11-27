@@ -1,0 +1,453 @@
+package com.zoesoc
+
+import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import android.graphics.Typeface
+import android.view.GestureDetector
+import android.view.MotionEvent
+import android.view.View
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.min
+import kotlin.math.sin
+
+/**
+ * Pantalla principal de la app, pensada en horizontal. Se dibuja en un lienzo virtual de 1000 × 600
+ * que se escala a la pantalla. Páginas: 0 Cabina, 1 Digital, 2 Clásico, 3 Detalle (se cambian deslizando).
+ * Solo se dibuja la página visible y solo cuando llega un dato nuevo (o durante la animación de carga).
+ */
+class DashView(ctx: Context) : View(ctx) {
+    var onSettings: (() -> Unit)? = null
+    private val prefs = Prefs(ctx)
+    var page: Int = prefs.page.coerceIn(0, 3)
+        private set
+    private var data: ZoeData? = null
+    private var status = ""
+
+    fun update(d: ZoeData?, st: String) {
+        data = d
+        status = st
+        invalidate()
+    }
+
+    // ---------- escala ----------
+    private val vw = 1000f
+    private val vh = 600f
+    private var sc = 1f
+    private var ox = 0f
+    private var oy = 0f
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        sc = min(w / vw, h / vh)
+        ox = (w - vw * sc) / 2
+        oy = (h - vh * sc) / 2
+    }
+
+    // ---------- colores y pinturas ----------
+    private val bgC = 0xFF0B0E11.toInt()
+    private val textC = 0xFFE9EEF3.toInt()
+    private val dimC = 0xFF8D97A1.toInt()
+    private val subC = 0xFFB8C0C8.toInt()
+    private val panelC = 0xFF151A1F.toInt()
+    private val trackC = 0xFF1F242A.toInt()
+    private val lightC = 0xFFE6ECF2.toInt()
+    private val needleC = 0xFFFF5A36.toInt()
+
+    private val tp = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+    private val rect = RectF()
+    private val boltPath = Path().apply {
+        moveTo(7f, 0f); lineTo(0f, 13f); lineTo(5.5f, 13f); lineTo(4f, 22f); lineTo(12f, 8f); lineTo(6.5f, 8f); lineTo(9f, 0f); close()
+    }
+
+    private fun txt(c: Canvas, s: String, x: Float, y: Float, size: Float, color: Int, bold: Boolean = false, align: Paint.Align = Paint.Align.LEFT) {
+        tp.textSize = size; tp.color = color; tp.textAlign = align
+        tp.typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+        c.drawText(s, x, y, tp)
+    }
+
+    private fun tw(s: String, size: Float, bold: Boolean): Float {
+        tp.textSize = size; tp.typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+        return tp.measureText(s)
+    }
+
+    /** SOC con entero grande y decimal/% pequeños. Devuelve la x donde termina. */
+    private fun pct(c: Canvas, s: Double?, x: Float, base: Float, size: Float, color: Int, center: Boolean): Float {
+        if (s == null) {
+            val w = tw("--%", size, true)
+            val x0 = if (center) x - w / 2 else x
+            txt(c, "--%", x0, base, size, color, true)
+            return x0 + w
+        }
+        val (i, d) = Fmt.socParts(s)
+        val wi = tw(i, size, true); val wd = tw(",$d", size * 0.58f, true); val wp = tw("%", size * 0.62f, true)
+        var cx = if (center) x - (wi + wd + wp) / 2 else x
+        txt(c, i, cx, base, size, color, true); cx += wi
+        txt(c, ",$d", cx, base, size * 0.58f, color, true); cx += wd
+        txt(c, "%", cx, base, size * 0.62f, color, true); cx += wp
+        return cx
+    }
+
+    private fun bolt(c: Canvas, x: Float, top: Float, h: Float, alpha: Int = 255) {
+        c.save(); c.translate(x, top); val k = h / 22f; c.scale(k, k)
+        fill.color = Colors.AMBER; fill.alpha = alpha
+        c.drawPath(boltPath, fill)
+        fill.alpha = 255
+        c.restore()
+    }
+
+    /** Reloj redondo con aguja y número. zero = punto desde donde se pinta el arco (potencia: 0). */
+    private fun dial(
+        c: Canvas, cx: Float, cy: Float, r: Float, mn: Double, mx: Double, v: Double?, step: Double,
+        label: String, unit: String, dec: Int, zero: Double? = null, arcColor: Int? = null, valueColor: Int = textC,
+    ) {
+        fun ang(x: Double): Float = (135.0 + 270.0 * ((x - mn) / (mx - mn)).coerceIn(0.0, 1.0)).toFloat()
+        rect.set(cx - r, cy - r, cx + r, cy + r)
+        line.strokeWidth = 14f; line.color = trackC
+        c.drawArc(rect, 135f, 270f, false, line)
+        if (v != null) {
+            val z = zero ?: mn
+            val a0 = ang(z); val a1 = ang(v)
+            line.color = arcColor ?: if (v < z) Colors.GREEN else lightC
+            if (abs(a1 - a0) > 0.5f) c.drawArc(rect, min(a0, a1), abs(a1 - a0), false, line)
+        }
+        line.strokeWidth = 3f; line.color = 0xFF5F6670.toInt()
+        var t = mn
+        while (t <= mx + 1e-6) {
+            val a = Math.toRadians(ang(t).toDouble())
+            val ca = cos(a).toFloat(); val sa = sin(a).toFloat()
+            c.drawLine(cx + (r - 22) * ca, cy + (r - 22) * sa, cx + (r - 36) * ca, cy + (r - 36) * sa, line)
+            txt(c, t.toInt().toString(), cx + (r - 62) * ca, cy + (r - 62) * sa + 9, 26f, 0xFF6B747E.toInt(), align = Paint.Align.CENTER)
+            t += step
+        }
+        val a = Math.toRadians(ang(v ?: mn).toDouble())
+        line.strokeWidth = 6f; line.color = needleC
+        c.drawLine(cx, cy, cx + (r - 30) * cos(a).toFloat(), cy + (r - 30) * sin(a).toFloat(), line)
+        fill.color = needleC
+        c.drawCircle(cx, cy, 11f, fill)
+        txt(c, v?.let { Fmt.f(it, dec) } ?: "--", cx, cy + r * 0.55f, r * 0.30f, valueColor, true, Paint.Align.CENTER)
+        txt(c, unit, cx, cy + r * 0.55f + 32, 24f, dimC, align = Paint.Align.CENTER)
+        txt(c, label, cx, cy - r * 0.32f, 24f, dimC, align = Paint.Align.CENTER)
+    }
+
+    private fun car(c: Canvas, cx: Float, top: Float, h: Float, d: ZoeData?, pulse: Int, showPack: Boolean = true) {
+        val w = h * CarArt.W / CarArt.H
+        val s = d?.displaySoc
+        CarArt.draw(
+            c, cx - w / 2, top, h, s, Colors.soc(s), CarArt.tireColors(d, prefs.refPsi),
+            showPack = showPack, packAlpha = pulse, lights = CarArt.lightsOn(d, prefs.lightsMode),
+            bolt = d?.charging == true,
+        )
+    }
+
+    // ---------- datos derivados ----------
+    private fun live(d: ZoeData?) = d != null && System.currentTimeMillis() - d.fastTime < 10_000
+    private fun speed(d: ZoeData?) = if (live(d)) d?.speedKmh else null
+    private fun power(d: ZoeData?) = if (live(d)) d?.powerKw else null
+    private fun pulseAlpha(d: ZoeData?): Int {
+        if (d?.charging != true) return 255
+        val t = (System.currentTimeMillis() % 1600L) / 1600.0
+        return (150 + 105 * (0.5 + 0.5 * cos(t * 2 * Math.PI))).toInt()
+    }
+    private fun eta(d: ZoeData, target: Double): String? = d.minutesTo(target)?.let { Fmt.dur(it) }
+
+    // ---------- dibujo ----------
+    override fun onDraw(c: Canvas) {
+        c.drawColor(bgC)
+        c.save()
+        c.translate(ox, oy)
+        c.scale(sc, sc)
+        val d = data
+        when (page) {
+            0 -> drawCabin(c, d)
+            1 -> drawDigital(c, d)
+            2 -> drawClassic(c, d)
+            else -> drawDetail(c, d)
+        }
+        drawHeader(c, d)
+        drawDots(c)
+        c.restore()
+        if (d?.charging == true && page != 3) postInvalidateDelayed(50)
+    }
+
+    private fun drawHeader(c: Canvas, d: ZoeData?) {
+        val st = when {
+            !ZoeService.running -> "detenido"
+            d?.charging == true -> "cargando"
+            status == "OK" -> "conectado"
+            else -> status
+        }
+        val title = if (page == 3) "Detalle" else "Zoe · $st"
+        txt(c, title.take(40), 24f, 40f, 26f, dimC)
+        if (d?.climOn == true && page != 3) txt(c, "❄ A/C", 900f, 40f, 26f, subC, align = Paint.Align.RIGHT)
+        // Engranaje (abre ajustes)
+        val gx = 960f; val gy = 34f
+        line.strokeWidth = 5f; line.color = dimC
+        c.drawCircle(gx, gy, 11f, line.apply { style = Paint.Style.STROKE })
+        line.strokeWidth = 6f
+        for (i in 0 until 8) {
+            val a = i * Math.PI / 4
+            c.drawLine(gx + 14 * cos(a).toFloat(), gy + 14 * sin(a).toFloat(), gx + 19 * cos(a).toFloat(), gy + 19 * sin(a).toFloat(), line)
+        }
+    }
+
+    private fun drawDots(c: Canvas) {
+        for (i in 0 until 4) {
+            fill.color = if (i == page) textC else 0xFF3A4048.toInt()
+            c.drawCircle(500f + (i - 1.5f) * 22f, 588f, 5f, fill)
+        }
+    }
+
+    /** A · Cabina: velocidad y potencia a los lados, carro al centro, franja de datos abajo. */
+    private fun drawCabin(c: Canvas, d: ZoeData?) {
+        val charging = d?.charging == true
+        dial(c, 220f, 250f, 170f, 0.0, 140.0, speed(d), 20.0, "Velocidad", "km/h", 0)
+        if (charging) {
+            dial(c, 780f, 250f, 170f, 0.0, 20.0, d?.chargingKw, 5.0, "Carga", "kW", 1, arcColor = Colors.AMBER, valueColor = Colors.AMBER)
+        } else {
+            dial(c, 780f, 250f, 170f, -30.0, 90.0, power(d), 30.0, "Potencia", "kW", 1, zero = 0.0)
+        }
+        car(c, 500f, 48f, 263f, d, pulseAlpha(d))
+        val s = d?.displaySoc
+        pct(c, s, 500f, 385f, 63f, Colors.soc(s), center = true)
+        d?.rangeKm?.let { txt(c, "$it km", 500f, 425f, 28f, subC, align = Paint.Align.CENTER) }
+
+        fill.color = panelC
+        c.drawRoundRect(16f, 470f, 984f, 556f, 20f, 20f, fill)
+        val chips = mutableListOf(
+            "Exterior" to Fmt.temp(d?.extTemp), "Interior" to Fmt.temp(d?.cabinTemp), "Batería" to Fmt.temp(d?.tempC),
+        )
+        if (charging && d != null) {
+            chips += "Al 80 %" to (eta(d, 80.0) ?: "--")
+            chips += "Cargado" to (Fmt.f(prefs.chgKwh.toDouble(), 1) + " kWh")
+        } else {
+            chips += "Instantáneo" to (if (live(d)) d?.instantConsumption?.let { Fmt.f(it, 1) } ?: "--" else "--")
+            chips += "Promedio" to (d?.avgConsumption?.let { Fmt.f(it, 1) } ?: "--")
+        }
+        val cw = 968f / chips.size
+        chips.forEachIndexed { i, (l, v) ->
+            val x = 16f + cw * (i + 0.5f)
+            txt(c, l, x, 503f, 24f, dimC, align = Paint.Align.CENTER)
+            txt(c, v, x, 541f, 30f, textC, true, Paint.Align.CENTER)
+        }
+    }
+
+    /** B · Digital: carro grande con presiones, SOC, velocidad grande y barra de potencia (o la carga). */
+    private fun drawDigital(c: Canvas, d: ZoeData?) {
+        val charging = d?.charging == true
+        val carTop = 54f; val carH = 434f
+        val carW = carH * CarArt.W / CarArt.H
+        val carCx = 120f + carW / 2
+        car(c, carCx, carTop, carH, d, pulseAlpha(d))
+        tirePsi(c, d, carCx - carW / 2 - 12f, carCx + carW / 2 + 12f, carTop, carH, 32f)
+
+        val x0 = 470f
+        val s = d?.displaySoc
+        val end = pct(c, s, x0, 135f, 84f, Colors.soc(s), center = false)
+        if (charging) bolt(c, end + 12f, 75f, 56f, pulseAlpha(d))
+        val l1 = listOfNotNull(d?.rangeKm?.let { "$it km" }, d?.tempC?.let { "Batería " + Fmt.f(it, 0) + " °C" }).joinToString(" · ")
+        val l2 = listOfNotNull(
+            d?.extTemp?.let { "Ext. " + Fmt.f(it, 0) + " °C" }, d?.cabinTemp?.let { "Int. " + Fmt.f(it, 0) + " °C" },
+            if (d?.climOn == true) "❄ A/C" else null,
+        ).joinToString(" · ")
+        txt(c, l1, x0, 182f, 28f, subC)
+        txt(c, l2, x0, 218f, 28f, subC)
+
+        val bx0 = 470f; val bx1 = 950f
+        if (charging && d != null) {
+            val kw = d.chargingKw?.let { Fmt.f(it, 1) } ?: "--"
+            txt(c, kw, x0, 360f, 100f, Colors.AMBER, true)
+            txt(c, "kW entrando", x0 + tw(kw, 100f, true) + 12f, 360f, 34f, dimC)
+            // barra de progreso con flujo
+            fill.color = trackC
+            c.drawRoundRect(bx0, 400f, bx1, 424f, 12f, 12f, fill)
+            val fx = bx0 + (bx1 - bx0) * ((s ?: 0.0).coerceIn(0.0, 100.0) / 100.0).toFloat()
+            fill.color = Colors.GREEN
+            c.drawRoundRect(bx0, 400f, fx, 424f, 12f, 12f, fill)
+            c.save()
+            c.clipRect(bx0, 400f, fx, 424f)
+            fill.color = 0x59FFFFFF
+            val off = (System.currentTimeMillis() % 1000L) / 1000f * 48f
+            var sx = bx0 - 48f + off
+            while (sx < fx) { c.drawRect(sx, 400f, sx + 14f, 424f, fill); sx += 48f }
+            c.restore()
+            val mk = bx0 + (bx1 - bx0) * 0.8f
+            line.strokeWidth = 4f; line.color = textC
+            c.drawLine(mk, 392f, mk, 432f, line)
+            txt(c, eta(d, 80.0)?.let { "80 % en $it" } ?: "Sobre 80 %", x0, 466f, 28f, textC)
+            eta(d, 100.0)?.let { txt(c, "100 % en $it", bx1, 466f, 26f, dimC, align = Paint.Align.RIGHT) }
+            val since = History.startHour(prefs)?.let { " desde las $it" } ?: ""
+            txt(c, "Cargado: " + Fmt.f(prefs.chgKwh.toDouble(), 1) + " kWh" + since, x0, 504f, 26f, dimC)
+        } else {
+            val sp = speed(d)
+            val st = sp?.let { Fmt.f(it, 0) } ?: "--"
+            txt(c, st, x0, 400f, 116f, textC, true)
+            txt(c, "km/h", x0 + tw(st, 116f, true) + 12f, 400f, 34f, dimC)
+            val pw = power(d)
+            txt(c, "regen", bx0, 460f, 26f, Colors.GREEN)
+            txt(c, pw?.let { Fmt.f(it, 1) + " kW" } ?: "-- kW", bx1, 460f, 26f, dimC, align = Paint.Align.RIGHT)
+            fill.color = trackC
+            c.drawRoundRect(bx0, 476f, bx1, 494f, 9f, 9f, fill)
+            val zx = bx0 + (bx1 - bx0) * 0.25f
+            if (pw != null) {
+                val vx = bx0 + (bx1 - bx0) * (((pw + 30) / 120).coerceIn(0.0, 1.0)).toFloat()
+                fill.color = if (pw < 0) Colors.GREEN else lightC
+                c.drawRoundRect(min(zx, vx), 476f, maxOf(zx, vx), 494f, 9f, 9f, fill)
+            }
+            line.strokeWidth = 4f; line.color = subC
+            c.drawLine(zx, 466f, zx, 504f, line)
+            val inst = if (live(d)) d?.instantConsumption?.let { Fmt.f(it, 1) } else null
+            val avg = d?.avgConsumption?.let { Fmt.f(it, 1) }
+            txt(c, "Inst. ${inst ?: "--"} · Prom. ${avg ?: "--"} kWh/100", x0, 538f, 26f, dimC)
+        }
+    }
+
+    /** C · Clásico: dos relojes grandes y batería vertical en el centro. */
+    private fun drawClassic(c: Canvas, d: ZoeData?) {
+        val charging = d?.charging == true
+        dial(c, 220f, 226f, 195f, 0.0, 140.0, speed(d), 20.0, "Velocidad", "km/h", 0)
+        if (charging) {
+            dial(c, 780f, 226f, 195f, 0.0, 20.0, d?.chargingKw, 5.0, "Carga", "kW", 1, arcColor = Colors.AMBER, valueColor = Colors.AMBER)
+        } else {
+            dial(c, 780f, 226f, 195f, -30.0, 90.0, power(d), 30.0, "Potencia", "kW", 1, zero = 0.0)
+        }
+        val s = d?.displaySoc
+        val col = Colors.soc(s)
+        fill.color = lightC
+        c.drawRoundRect(475f, 32f, 525f, 56f, 6f, 6f, fill)
+        line.strokeWidth = 4f; line.color = lightC
+        c.drawRoundRect(445f, 54f, 555f, 366f, 12f, 12f, line)
+        if (s != null) {
+            val top = 360f - (360f - 60f) * (s.coerceIn(0.0, 100.0) / 100.0).toFloat()
+            fill.color = col; fill.alpha = pulseAlpha(d)
+            c.drawRoundRect(451f, top, 549f, 360f, 8f, 8f, fill)
+            fill.alpha = 255
+        }
+        if (charging) bolt(c, 476f, 160f, 90f, pulseAlpha(d))
+        pct(c, s, 500f, 440f, 58f, col, center = true)
+        d?.rangeKm?.let { txt(c, "$it km", 500f, 476f, 28f, subC, align = Paint.Align.CENTER) }
+        val tiresTxt: Pair<String, Int> = run {
+            val cols = CarArt.tireColors(d, prefs.refPsi)
+            when {
+                d?.tires == null -> "Llantas --" to dimC
+                cols.any { it == Colors.RED } -> "Llanta muy baja" to Colors.RED
+                cols.any { it == Colors.AMBER } -> "Revisar llantas" to Colors.AMBER
+                else -> "Llantas OK" to Colors.GREEN
+            }
+        }
+        val cab = "Int. " + Fmt.temp(d?.cabinTemp) + if (d?.climOn == true) " ❄" else ""
+        val items = listOf(
+            ("Ext. " + Fmt.temp(d?.extTemp)) to dimC, cab to dimC,
+            (if (charging && d != null) (eta(d, 80.0)?.let { "80 % en $it" } ?: "Cargando") else "Batería " + Fmt.temp(d?.tempC)) to dimC,
+            tiresTxt,
+        )
+        items.forEachIndexed { i, (t, col2) -> txt(c, t, 125f + 250f * i, 560f, 26f, col2, align = Paint.Align.CENTER) }
+    }
+
+    /** Página 2: salud de la batería, llantas y cargas. */
+    private fun drawDetail(c: Canvas, d: ZoeData?) {
+        // Batería
+        fill.color = panelC
+        c.drawRoundRect(20f, 70f, 360f, 556f, 20f, 20f, fill)
+        txt(c, "Salud de la batería", 40f, 110f, 26f, dimC)
+        txt(c, d?.soh?.let { Fmt.f(it, 1) + " %" } ?: "--", 40f, 172f, 58f, Colors.GREEN, true)
+        val pts = prefs.sohHistory.map { it.second }
+        if (pts.size >= 2) {
+            val lo = (pts.minOrNull() ?: 0.0) - 0.5; val hi = (pts.maxOrNull() ?: 100.0) + 0.5
+            val p = Path()
+            pts.forEachIndexed { i, v ->
+                val x = 40f + 300f * i / (pts.size - 1)
+                val y = 200f + 80f * (1 - ((v - lo) / (hi - lo)).toFloat())
+                if (i == 0) p.moveTo(x, y) else p.lineTo(x, y)
+            }
+            line.strokeWidth = 4f; line.color = Colors.GREEN
+            c.drawPath(p, line)
+        } else {
+            txt(c, "Se llena con un punto por día", 40f, 245f, 24f, dimC)
+        }
+        fun row(y: Float, l: String, v: String, col: Int = textC) {
+            txt(c, l, 40f, y, 28f, dimC); txt(c, v, 340f, y, 28f, col, true, Paint.Align.RIGHT)
+        }
+        row(340f, "Dif. celdas", d?.cellDiffMv?.let { "$it mV" } ?: "--", if ((d?.cellDiffMv ?: 0) > 50) Colors.AMBER else textC)
+        row(390f, "Batería 12 V", d?.v12?.let { Fmt.f(it, 1) + " V" } ?: "--", if ((d?.v12 ?: 13.0) < 12.0) Colors.AMBER else textC)
+        row(440f, "Temp. batería", Fmt.temp(d?.tempC))
+        row(490f, "SOC real", d?.realSoc?.let { Fmt.f(it, 1) + " %" } ?: "--")
+
+        // Llantas
+        txt(c, "Llantas (PSI)", 500f, 100f, 26f, dimC, align = Paint.Align.CENTER)
+        val h = 400f; val w = h * CarArt.W / CarArt.H
+        car(c, 500f, 125f, h, d, 255, showPack = false)
+        tirePsi(c, d, 500f - w / 2 - 10f, 500f + w / 2 + 10f, 125f, h, 34f)
+
+        // Cargas
+        fill.color = panelC
+        c.drawRoundRect(640f, 70f, 980f, 556f, 20f, 20f, fill)
+        txt(c, "Cargas", 660f, 110f, 26f, dimC)
+        val state = when {
+            d == null || d.plugged == null -> "--"
+            d.charging -> "Cargando " + (d.chargingKw?.let { Fmt.f(it, 1) + " kW" } ?: "")
+            d.plugged == true -> "Conectado"
+            else -> "Desconectado"
+        }
+        txt(c, state, 660f, 158f, 32f, if (d?.charging == true) Colors.AMBER else textC, true)
+        val hist = prefs.chargeHistory
+        if (hist.isEmpty()) txt(c, "Aún no hay cargas", 660f, 210f, 26f, dimC)
+        hist.take(4).forEachIndexed { i, hTxt ->
+            val parts = hTxt.split(" · ")
+            txt(c, parts.getOrElse(0) { "" }, 660f, 210f + i * 42f, 28f, dimC)
+            txt(c, parts.getOrElse(1) { "" }, 960f, 210f + i * 42f, 28f, textC, true, Paint.Align.RIGHT)
+        }
+        txt(c, "Consumo promedio", 660f, 420f, 26f, dimC)
+        txt(c, d?.avgConsumption?.let { Fmt.f(it, 1) + " kWh/100" } ?: "--", 660f, 466f, 38f, textC, true)
+        txt(c, "Exterior " + Fmt.temp(d?.extTemp) + " · Interior " + Fmt.temp(d?.cabinTemp), 660f, 520f, 24f, dimC)
+    }
+
+    /** Presiones junto a cada llanta, por fuera del carro (izquierda alineada hacia el carro). */
+    private fun tirePsi(c: Canvas, d: ZoeData?, xl: Float, xr: Float, top: Float, h: Float, size: Float) {
+        val t = d?.tires
+        val yF = top + h * 25.5f / CarArt.H + size * 0.35f
+        val yR = top + h * 86.5f / CarArt.H + size * 0.35f
+        val ref = prefs.refPsi
+        fun one(v: Double?, x: Float, y: Float, al: Paint.Align) {
+            val col = if (v == null) dimC else Colors.tire(v, ref)
+            txt(c, v?.let { Math.round(it).toString() } ?: "--", x, y, size, col, true, al)
+        }
+        one(t?.fl, xl, yF, Paint.Align.RIGHT); one(t?.fr, xr, yF, Paint.Align.LEFT)
+        one(t?.rl, xl, yR, Paint.Align.RIGHT); one(t?.rr, xr, yR, Paint.Align.LEFT)
+    }
+
+    // ---------- toques: deslizar cambia de página; engranaje abre ajustes ----------
+    private val gestures = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onDown(e: MotionEvent): Boolean = true
+
+        override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
+            if (abs(velocityX) > abs(velocityY) && abs(velocityX) > 500) {
+                go(if (velocityX < 0) 1 else -1)
+                return true
+            }
+            return false
+        }
+
+        override fun onSingleTapUp(e: MotionEvent): Boolean {
+            val x = (e.x - ox) / sc
+            val y = (e.y - oy) / sc
+            when {
+                x > 900 && y < 90 -> onSettings?.invoke()
+                y > 560 -> go(if (x < 500) -1 else 1) // tocar los puntitos también cambia
+            }
+            return true
+        }
+    })
+
+    private fun go(delta: Int) {
+        page = (page + delta + 4) % 4
+        prefs.page = page
+        invalidate()
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean = gestures.onTouchEvent(event) || super.onTouchEvent(event)
+}

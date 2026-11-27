@@ -21,6 +21,10 @@ data class ZoeData(
     val availKwh: Double? = null,       // energía disponible
     val avgConsumption: Double? = null, // consumo promedio del carro (kWh/100 km)
     val tires: Tires? = null,
+    val extTemp: Double? = null,        // temperatura exterior
+    val cabinTemp: Double? = null,      // temperatura dentro del carro
+    val climOn: Boolean? = null,        // climatizador funcionando
+    val lightsOn: Boolean? = null,      // luces (null = no se pudo leer)
     val speedKmh: Double? = null,       // velocidad (solo con la app abierta)
     val powerKw: Double? = null,        // potencia instantánea (+ consume, − regenera)
     val time: Long = System.currentTimeMillis(),
@@ -59,6 +63,9 @@ data class ZoeData(
  *  654 bit 2 enchufe conectado, 52-61 ×0.1 consumo promedio · 42E 56-63 ×0.3 potencia de carga
  *  427 49-57 ×0.1 energía disponible · 673 presiones ×13.725 mbar (FL 40, FR 32, RL 24, RR 16)
  *  5D7 0-15 ×0.01 velocidad · 1FD 48-55 (x−80) potencia kW
+ *  656 48-55 (x−40) temperatura exterior · 42A 48-50 modo del clima
+ *  5DE byte 0 bit 0x04 luces (dato del Smart EQ, misma plataforma; no está en CanZE)
+ * Clima 744/764: 2121 26-35 (x−400)×0.1 temperatura interior
  */
 class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
     private var soh: Double? = null
@@ -68,6 +75,10 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
     private var tires: Tires? = null
     private var avgCons: Double? = null
     private var avail: Double? = null
+    private var ext: Double? = null
+    private var clim: Boolean? = null
+    private var lights: Boolean? = null
+    private var turn = 0
 
     private inline fun <T> tryOr(name: String, f: () -> T): T? = try {
         f()
@@ -112,6 +123,10 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
 
         if (answered == 0) throw ElmException("el carro no responde (¿apagado?)")
 
+        val cabin = tryOr("2121") {
+            Bits.field(elm.request(HVAC_TX, HVAC_RX, "2121"), 26, 35, 0.1, 400.0)
+        }?.takeIf { it in -40.0..80.0 }
+
         // Tramas libres: si alguna no llega, se conserva el último valor.
         var plugged: Boolean? = null
         tryOr("654") {
@@ -122,14 +137,24 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
         }
         var chg: Double? = null
         if (plugged == true) chg = tryOr("42E") { Bits.field(elm.freeFrame("42E", 600), 56, 63, 0.3, 0.0) }
-        tryOr("427") {
-            val e = Bits.field(elm.freeFrame("427", 600), 49, 57, 0.1, 0.0)
-            if (e in 0.5..60.0) avail = e
-        }
-        tryOr("673") {
-            val f = elm.freeFrame("673", 1200)
-            val t = Tires(psi(f, 40), psi(f, 32), psi(f, 24), psi(f, 16))
-            if (t.fl != null || t.fr != null || t.rl != null || t.rr != null) tires = t
+        // Luces: si la trama no existe en este carro, queda null y se dibujan encendidas.
+        quiet { lights = Bits.get(elm.freeFrame("5DE", 500), 5, 5) == 1L }
+        // Las demás tramas lentas se turnan, una por ciclo, para que cada lectura sea corta.
+        when (turn++ % 4) {
+            0 -> tryOr("673") {
+                val f = elm.freeFrame("673", 1200)
+                val t = Tires(psi(f, 40), psi(f, 32), psi(f, 24), psi(f, 16))
+                if (t.fl != null || t.fr != null || t.rl != null || t.rr != null) tires = t
+            }
+            1 -> tryOr("656") {
+                val e = Bits.field(elm.freeFrame("656", 1200), 48, 55, 1.0, 40.0)
+                if (e in -40.0..70.0) ext = e
+            }
+            2 -> tryOr("427") {
+                val e = Bits.field(elm.freeFrame("427", 600), 49, 57, 0.1, 0.0)
+                if (e in 0.5..60.0) avail = e
+            }
+            else -> tryOr("42A") { clim = Bits.get(elm.freeFrame("42A", 600), 48, 50) != 0L }
         }
 
         if (usoc != null && (usoc!! < 0 || usoc!! > 100)) { log("USOC fuera de rango: $usoc"); usoc = null }
@@ -140,6 +165,7 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
             soc = usoc, realSoc = real, soh = soh, tempC = temp, currentA = current, rangeKm = range,
             v12 = v12?.takeIf { it in 5.0..20.0 }, cellDiffMv = cellDiff, plugged = plugged, chargingKw = chg,
             availKwh = avail, avgConsumption = avgCons, tires = tires,
+            extTemp = ext, cabinTemp = cabin, climOn = clim, lightsOn = lights,
         )
     }
 
@@ -172,6 +198,8 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
         const val LBC_RX = "7BB"
         const val EVC_TX = "7E4"
         const val EVC_RX = "7EC"
+        const val HVAC_TX = "744"
+        const val HVAC_RX = "764"
         const val SLOW_MS = 10 * 60_000L
     }
 }
@@ -213,6 +241,8 @@ object Fmt {
 
     fun soc(d: ZoeData?): String = d?.displaySoc?.let { it.roundToInt().toString() + "%" } ?: "--%"
     fun socDec(d: ZoeData?): String = d?.displaySoc?.let { f(it, 1) + " %" } ?: "-- %"
+
+    fun temp(v: Double?): String = v?.let { f(it, 0) + " °C" } ?: "--"
 
     fun dur(min: Int): String = if (min >= 60) "${min / 60} h ${String.format(ES, "%02d", min % 60)} min" else "$min min"
 

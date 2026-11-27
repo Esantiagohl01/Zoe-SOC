@@ -51,6 +51,7 @@ class Overlay(private val ctx: Context) {
         val v = view ?: return
         v.data = d
         v.refPsi = prefs.refPsi
+        v.lightsMode = prefs.lightsMode
         if (v.status != status && (v.status == "OK" || status == "OK")) v.requestLayout()
         v.status = status
         v.alpha = if (d == null || System.currentTimeMillis() - d.time > 120_000) 0.6f else 1f
@@ -116,6 +117,7 @@ class BubbleView(ctx: Context) : View(ctx) {
     var status: String = ""
     var compact = false
     var refPsi = 35
+    var lightsMode = 0
 
     private val dm = resources.displayMetrics
     private fun dp(v: Float) = v * dm.density
@@ -161,7 +163,10 @@ class BubbleView(ctx: Context) : View(ctx) {
             (150 + 105 * (0.5 + 0.5 * kotlin.math.cos(t * 2 * Math.PI))).toInt()
         } else 255
         val carH = dp(94f)
-        CarArt.draw(c, dp(12f), dp(5f), carH, s, col, CarArt.tireColors(d, refPsi), packAlpha = alpha)
+        CarArt.draw(
+            c, dp(12f), dp(5f), carH, s, col, CarArt.tireColors(d, refPsi),
+            packAlpha = alpha, lights = CarArt.lightsOn(d, lightsMode),
+        )
 
         // Porcentaje: entero grande, decimal y % pequeños.
         val x0 = dp(74f)

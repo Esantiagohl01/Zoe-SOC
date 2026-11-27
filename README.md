@@ -9,7 +9,8 @@ Solo lee datos. No escribe nada en los módulos del carro.
 - Se conecta solo al Vgate por BLE o Bluetooth clásico (prueba ambos).
 - Burbuja flotante (también encima de AutoKit/CarPlay): carro visto desde arriba con la batería que se llena según la carga, llantas de colores según la presión, faros y stops; SOC con decimal y temperatura de la batería. Cargando: rayo, kW y tiempo estimado al 80 %. Tocándola pasa a modo compacto (solo %), pegada a la derecha.
 - Colores: verde ≥ 30 %, amarillo < 30 %, rojo < 20 %.
-- App tipo tablero: medidor con SOC y autonomía; en vivo (solo con la app abierta) potencia, velocidad y consumo instantáneo; consumo promedio, temperatura, SOH, batería 12 V, diferencia entre celdas, estado de carga, última carga, gráfica del SOH y presión de llantas en PSI.
+- App a pantalla completa, pensada en horizontal (R-Link + Carlinkit), con tres diseños que se cambian deslizando: Cabina (relojes de velocidad y potencia con el carro al centro), Digital (carro grande con presiones, velocidad grande y barra de potencia) y Clásico (relojes grandes y batería vertical). Una cuarta pantalla de Detalle tiene salud de la batería, celdas, 12 V, llantas, cargas y consumo. Cargando, cada diseño muestra los kW, el tiempo al 80 % / 100 % y lo cargado. El engranaje abre los ajustes.
+- Temperatura exterior e interior, A/C, y luces según el carro (si no se pueden leer, quedan encendidas; también se pueden dejar siempre encendidas en ajustes).
 - Arranca sola al encender la caja. Si el carro está apagado reintenta cada 20 s; si se pierde el Bluetooth reconecta cada 10 s.
 
 ## Cómo obtener el APK
@@ -52,8 +53,11 @@ Los valores vienen de los archivos de campos de CanZE para el Zoe fase 1. Aun as
 | Energía disponible | trama 427 | 49–57 ×0.1 kWh |
 | Llantas | trama 673 | ×13.725 mbar → PSI |
 | Velocidad / potencia | tramas 5D7 / 1FD | ×0.01 km/h / (x−80) kW |
+| Temp. exterior / modo clima | tramas 656 / 42A | 48–55 x−40 / 48–50 |
+| Temp. interior | Clima 744/764 · 2121 | 26–35 (x−400)×0.1 |
+| Luces (prueba) | trama 5DE | byte 0 bit 0x04 (dato del Smart EQ) |
 
-Las luces no aparecen en los datos de CanZE, así que en el dibujo quedan siempre encendidas.
+Las luces no aparecen en los datos de CanZE; se prueba la trama 5DE del Smart EQ y, si no llega, quedan encendidas.
 
 ## Archivos
 

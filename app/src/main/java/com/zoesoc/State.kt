@@ -91,15 +91,36 @@ class Prefs(ctx: Context) {
         }
         set(v) = p.edit().putString("sohHist", v.joinToString(";") { "${it.first}=${it.second}" }).apply()
 
-    var chargeStartSoc: Float
-        get() = p.getFloat("chgStart", -1f)
-        set(v) = p.edit().putFloat("chgStart", v).apply()
-    var lastCharge: String?
-        get() = p.getString("lastCharge", null)
-        set(v) = p.edit().putString("lastCharge", v).apply()
+    /** 0 = luces según el carro (si no se leen, encendidas); 1 = siempre encendidas. */
+    var lightsMode: Int
+        get() = p.getInt("lightsMode", 0)
+        set(v) = p.edit().putInt("lightsMode", v).apply()
+    /** Pantalla de la app: 0 Cabina, 1 Digital, 2 Clásico, 3 Detalle. */
+    var page: Int
+        get() = p.getInt("page", 1)
+        set(v) = p.edit().putInt("page", v).apply()
+
+    // Sesión de carga en curso.
+    var chgStartTime: Long
+        get() = p.getLong("chgStartTime", 0L)
+        set(v) = p.edit().putLong("chgStartTime", v).apply()
+    var chgStartSoc: Float
+        get() = p.getFloat("chgStartSoc", 0f)
+        set(v) = p.edit().putFloat("chgStartSoc", v).apply()
+    var chgKwh: Float
+        get() = p.getFloat("chgKwh", 0f)
+        set(v) = p.edit().putFloat("chgKwh", v).apply()
+    var chgLastTs: Long
+        get() = p.getLong("chgLastTs", 0L)
+        set(v) = p.edit().putLong("chgLastTs", v).apply()
+
+    /** Últimas cargas, la más reciente primero: "dd/MM · 22 → 80 %". */
+    var chargeHistory: List<String>
+        get() = (p.getString("chgHist", "") ?: "").split('|').filter { it.isNotBlank() }
+        set(v) = p.edit().putString("chgHist", v.joinToString("|")).apply()
 }
 
-/** Guarda el SOH diario y detecta el inicio y fin de cada carga. */
+/** Guarda el SOH diario y lleva la sesión de carga (inicio, kWh cargados, historial). */
 object History {
     fun onData(ctx: Context, d: ZoeData) {
         val p = Prefs(ctx)
@@ -109,15 +130,27 @@ object History {
             if (list.lastOrNull()?.first != day) p.sohHistory = (list + (day to soh)).takeLast(365)
         }
         val s = d.displaySoc ?: return
-        val start = p.chargeStartSoc
-        if (d.charging && start < 0f) {
-            p.chargeStartSoc = s.toFloat()
-        } else if (!d.charging && d.plugged != null && start >= 0f) {
+        val now = System.currentTimeMillis()
+        if (d.charging) {
+            if (p.chgStartTime == 0L) {
+                p.chgStartTime = now
+                p.chgStartSoc = s.toFloat()
+                p.chgKwh = 0f
+            } else {
+                val hours = (now - p.chgLastTs).coerceIn(0L, 120_000L) / 3_600_000.0
+                p.chgKwh = p.chgKwh + ((d.chargingKw ?: 0.0) * hours).toFloat()
+            }
+            p.chgLastTs = now
+        } else if (d.plugged != null && p.chgStartTime != 0L) {
+            val start = p.chgStartSoc
             if (s - start >= 1) {
                 val day = SimpleDateFormat("dd/MM", Locale.US).format(Date())
-                p.lastCharge = "$day · ${start.toInt()}→${s.toInt()} %"
+                p.chargeHistory = (listOf("$day · ${start.toInt()} → ${s.toInt()} %") + p.chargeHistory).take(5)
             }
-            p.chargeStartSoc = -1f
+            p.chgStartTime = 0L
         }
     }
+
+    fun startHour(p: Prefs): String? =
+        if (p.chgStartTime == 0L) null else SimpleDateFormat("HH:mm", Locale.US).format(Date(p.chgStartTime))
 }
