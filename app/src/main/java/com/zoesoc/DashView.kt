@@ -22,6 +22,9 @@ import kotlin.math.sin
 class DashView(ctx: Context) : View(ctx) {
     var onSettings: (() -> Unit)? = null
     var onHome: (() -> Unit)? = null
+    var onAutoKit: (() -> Unit)? = null
+    /** true si AutoKit está instalado (se muestra el botón del teléfono). */
+    var hasAutoKit = false
     private val prefs = Prefs(ctx)
     var page: Int = prefs.page.coerceIn(0, PAGES - 1)
         private set
@@ -135,12 +138,13 @@ class DashView(ctx: Context) : View(ctx) {
         drawHeader(c, d)
         drawDots(c)
         drawHome(c)
+        drawAutoKit(c)
         c.restore()
         // Un solo temporizador (no se acumulan): animación de carga o segundero del reloj.
         // Un solo temporizador: animación de carga, o cambio de minuto del reloj.
         removeCallbacks(tick)
         if (page == 0) {
-            val toNextMinute = 60_000L - System.currentTimeMillis() % 60_000L + 50L
+            val toNextMinute = 60_000L - TimeFix.now() % 60_000L + 50L
             postDelayed(tick, if (d?.charging == true) 50L else toNextMinute)
         }
     }
@@ -163,6 +167,17 @@ class DashView(ctx: Context) : View(ctx) {
             val a = i * Math.PI / 4
             c.drawLine(gx + 14 * cos(a).toFloat(), gy + 14 * sin(a).toFloat(), gx + 19 * cos(a).toFloat(), gy + 19 * sin(a).toFloat(), line)
         }
+    }
+
+    /** Teléfono blanco encima de la casita: abre AutoKit (CarPlay). */
+    private fun drawAutoKit(c: Canvas) {
+        if (!hasAutoKit) return
+        val x = 50f; val y = 474f
+        fill.color = textC
+        c.drawRoundRect(x - 16, y - 26, x + 16, y + 26, 8f, 8f, fill)
+        fill.color = bgC
+        c.drawRoundRect(x - 12, y - 19, x + 12, y + 14, 3f, 3f, fill) // pantalla
+        c.drawCircle(x, y + 20, 3f, fill)                              // botón
     }
 
     /** Casita blanca abajo a la izquierda: vuelve al inicio del Tbox. */
@@ -334,13 +349,17 @@ class DashView(ctx: Context) : View(ctx) {
         txt(c, "Exterior " + Fmt.temp(d?.extTemp) + " · Interior " + Fmt.temp(d?.cabinTemp), 660f, 488f, 24f, dimC)
     }
 
-    /** Reloj digital grande con la fecha debajo (solo cambia una vez por minuto). */
+    /** Reloj digital grande con la fecha (hora de Bogotá, corregida con GPS o internet). */
     private fun drawDigitalClock(c: Canvas, cx: Float) {
-        val now = java.util.Date()
+        val now = java.util.Date(TimeFix.now())
         val es = java.util.Locale("es", "CO")
-        txt(c, java.text.SimpleDateFormat("HH:mm", es).format(now), cx, 150f, 100f, textC, true, Paint.Align.CENTER)
-        val day = java.text.SimpleDateFormat("EEE d MMM", es).format(now).replace(".", "")
-        txt(c, day, cx, 192f, 26f, dimC, align = Paint.Align.CENTER)
+        val tz = java.util.TimeZone.getTimeZone("America/Bogota")
+        val hh = java.text.SimpleDateFormat("HH:mm", es).apply { timeZone = tz }.format(now)
+        val day = java.text.SimpleDateFormat("EEE d MMM", es).apply { timeZone = tz }.format(now).replace(".", "")
+        // Tenue mientras no se haya confirmado la hora (recién encendido, sin GPS ni internet).
+        val col = if (TimeFix.synced) textC else 0xFF4A525B.toInt()
+        txt(c, hh, cx, 150f, 100f, col, true, Paint.Align.CENTER)
+        txt(c, if (TimeFix.synced) day else "sincronizando hora…", cx, 192f, 26f, dimC, align = Paint.Align.CENTER)
     }
 
     /** Presiones junto a cada llanta, por fuera del carro (izquierda alineada hacia el carro). */
@@ -374,7 +393,8 @@ class DashView(ctx: Context) : View(ctx) {
             val y = (e.y - oy) / sc
             when {
                 x > 900 && y < 90 -> onSettings?.invoke()
-                x < 110 && y > 500 -> onHome?.invoke()
+                x < 110 && y > 515 -> onHome?.invoke()
+                x < 110 && y in 440f..515f && hasAutoKit -> onAutoKit?.invoke()
                 y > 560 && x in 420f..580f -> go(if (x < 500) -1 else 1) // tocar los puntitos también cambia
             }
             return true

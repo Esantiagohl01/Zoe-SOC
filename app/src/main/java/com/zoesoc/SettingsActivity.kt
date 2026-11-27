@@ -42,7 +42,8 @@ object Perms {
 
     /** Pide los que falten; devuelve true si ya están los de Bluetooth. */
     fun ensure(a: Activity): Boolean {
-        val all = bt() + if (Build.VERSION.SDK_INT >= 33) listOf(Manifest.permission.POST_NOTIFICATIONS) else emptyList()
+        val loc = listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+        val all = (bt() + loc).distinct() + if (Build.VERSION.SDK_INT >= 33) listOf(Manifest.permission.POST_NOTIFICATIONS) else emptyList()
         val missing = all.filter { a.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (missing.isNotEmpty()) a.requestPermissions(missing.toTypedArray(), 1)
         return bt().all { a.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
