@@ -18,6 +18,10 @@ class MainActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         dash = DashView(this)
         dash.onSettings = { startActivity(Intent(this, SettingsActivity::class.java)) }
+        dash.onHome = {
+            // Muestra la pantalla de inicio del Tbox (la app sigue leyendo en segundo plano).
+            startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
         setContentView(dash)
 
         val ok = Perms.ensure(this)

@@ -79,6 +79,7 @@ class ZoeService : Service() {
                 var power: Double? = null
                 var fastTime = 0L
                 var lastFull = 0L
+                var fastTurn = 0
                 fun withLive(d: ZoeData) = d.copy(speedKmh = speed, powerKw = power, fastTime = fastTime)
                 while (running) {
                     try {
@@ -88,11 +89,12 @@ class ZoeService : Service() {
                             if (sp != null || pw != null) {
                                 speed = sp ?: speed; power = pw ?: power; fastTime = System.currentTimeMillis()
                             }
-                            val done = reader.step()
+                            // La batería, cada dos vueltas: menos tráfico, la velocidad sigue fluida (~3 por segundo).
+                            val done = if (fastTurn++ % 2 == 0) reader.step() else false
                             val d = withLive(reader.snapshot())
                             if (done) History.onData(this, d)
                             ZoeState.publish(d, "OK")
-                            if (!pause(20)) break
+                            if (!pause(60)) break
                         } else {
                             // Solo la burbuja: lectura completa cada 10 s.
                             if (System.currentTimeMillis() - lastFull >= FULL_MS) {

@@ -21,6 +21,7 @@ import kotlin.math.sin
  */
 class DashView(ctx: Context) : View(ctx) {
     var onSettings: (() -> Unit)? = null
+    var onHome: (() -> Unit)? = null
     private val prefs = Prefs(ctx)
     var page: Int = prefs.page.coerceIn(0, PAGES - 1)
         private set
@@ -133,10 +134,15 @@ class DashView(ctx: Context) : View(ctx) {
         if (page == 0) drawDigital(c, d) else drawDetail(c, d)
         drawHeader(c, d)
         drawDots(c)
+        drawHome(c)
         c.restore()
         // Un solo temporizador (no se acumulan): animación de carga o segundero del reloj.
+        // Un solo temporizador: animación de carga, o cambio de minuto del reloj.
         removeCallbacks(tick)
-        if (page == 0) postDelayed(tick, if (d?.charging == true) 50L else 1000L)
+        if (page == 0) {
+            val toNextMinute = 60_000L - System.currentTimeMillis() % 60_000L + 50L
+            postDelayed(tick, if (d?.charging == true) 50L else toNextMinute)
+        }
     }
 
     private fun drawHeader(c: Canvas, d: ZoeData?) {
@@ -159,6 +165,19 @@ class DashView(ctx: Context) : View(ctx) {
         }
     }
 
+    /** Casita blanca abajo a la izquierda: vuelve al inicio del Tbox. */
+    private fun drawHome(c: Canvas) {
+        val x = 50f; val y = 556f
+        val house = Path().apply {
+            moveTo(x, y - 30); lineTo(x + 27, y - 6); lineTo(x + 18, y - 6); lineTo(x + 18, y + 17)
+            lineTo(x - 18, y + 17); lineTo(x - 18, y - 6); lineTo(x - 27, y - 6); close()
+        }
+        fill.color = textC
+        c.drawPath(house, fill)
+        fill.color = bgC
+        c.drawRoundRect(x - 6, y + 2, x + 6, y + 17, 3f, 3f, fill) // puerta
+    }
+
     private fun drawDots(c: Canvas) {
         for (i in 0 until PAGES) {
             fill.color = if (i == page) textC else 0xFF3A4048.toInt()
@@ -171,8 +190,8 @@ class DashView(ctx: Context) : View(ctx) {
         val charging = d?.charging == true
         // Columna izquierda: reloj analógico arriba y carro más pequeño pegado abajo.
         val colX = 235f
-        drawClock(c, colX, 138f, 80f)
-        val carH = 292f
+        drawDigitalClock(c, colX)
+        val carH = 322f
         val carW = carH * CarArt.W / CarArt.H
         val carTop = 574f - carH
         car(c, colX, carTop, carH, d, pulseAlpha(d))
@@ -260,7 +279,7 @@ class DashView(ctx: Context) : View(ctx) {
     private fun drawDetail(c: Canvas, d: ZoeData?) {
         // Batería
         fill.color = panelC
-        c.drawRoundRect(20f, 70f, 360f, 556f, 20f, 20f, fill)
+        c.drawRoundRect(20f, 70f, 360f, 512f, 20f, 20f, fill)
         txt(c, "Salud de la batería", 40f, 110f, 26f, dimC)
         txt(c, d?.soh?.let { Fmt.f(it, 1) + " %" } ?: "--", 40f, 172f, 58f, Colors.GREEN, true)
         val pts = prefs.sohHistory.map { it.second }
@@ -280,10 +299,10 @@ class DashView(ctx: Context) : View(ctx) {
         fun row(y: Float, l: String, v: String, col: Int = textC) {
             txt(c, l, 40f, y, 28f, dimC); txt(c, v, 340f, y, 28f, col, true, Paint.Align.RIGHT)
         }
-        row(340f, "Dif. celdas", d?.cellDiffMv?.let { "$it mV" } ?: "--", if ((d?.cellDiffMv ?: 0) > 50) Colors.AMBER else textC)
-        row(390f, "Batería 12 V", d?.v12?.let { Fmt.f(it, 1) + " V" } ?: "--", if ((d?.v12 ?: 13.0) < 12.0) Colors.AMBER else textC)
-        row(440f, "Temp. batería", Fmt.temp(d?.tempC), Colors.batTemp(d?.tempC))
-        row(490f, "SOC real", d?.realSoc?.let { Fmt.f(it, 1) + " %" } ?: "--")
+        row(330f, "Dif. celdas", d?.cellDiffMv?.let { "$it mV" } ?: "--", if ((d?.cellDiffMv ?: 0) > 50) Colors.AMBER else textC)
+        row(375f, "Batería 12 V", d?.v12?.let { Fmt.f(it, 1) + " V" } ?: "--", if ((d?.v12 ?: 13.0) < 12.0) Colors.AMBER else textC)
+        row(420f, "Temp. batería", Fmt.temp(d?.tempC), Colors.batTemp(d?.tempC))
+        row(465f, "SOC real", d?.realSoc?.let { Fmt.f(it, 1) + " %" } ?: "--")
 
         // Llantas
         txt(c, "Llantas (PSI)", 500f, 100f, 26f, dimC, align = Paint.Align.CENTER)
@@ -294,7 +313,7 @@ class DashView(ctx: Context) : View(ctx) {
 
         // Cargas
         fill.color = panelC
-        c.drawRoundRect(640f, 70f, 980f, 556f, 20f, 20f, fill)
+        c.drawRoundRect(640f, 70f, 980f, 512f, 20f, 20f, fill)
         txt(c, "Cargas", 660f, 110f, 26f, dimC)
         val state = when {
             d == null || d.plugged == null -> "--"
@@ -310,39 +329,18 @@ class DashView(ctx: Context) : View(ctx) {
             txt(c, parts.getOrElse(0) { "" }, 660f, 210f + i * 42f, 28f, dimC)
             txt(c, parts.getOrElse(1) { "" }, 960f, 210f + i * 42f, 28f, textC, true, Paint.Align.RIGHT)
         }
-        txt(c, "Consumo promedio", 660f, 420f, 26f, dimC)
-        txt(c, d?.avgConsumption?.let { Fmt.f(it, 1) + " kWh/100" } ?: "--", 660f, 466f, 38f, textC, true)
-        txt(c, "Exterior " + Fmt.temp(d?.extTemp) + " · Interior " + Fmt.temp(d?.cabinTemp), 660f, 520f, 24f, dimC)
+        txt(c, "Consumo promedio", 660f, 395f, 26f, dimC)
+        txt(c, d?.avgConsumption?.let { Fmt.f(it, 1) + " kWh/100" } ?: "--", 660f, 438f, 38f, textC, true)
+        txt(c, "Exterior " + Fmt.temp(d?.extTemp) + " · Interior " + Fmt.temp(d?.cabinTemp), 660f, 488f, 24f, dimC)
     }
 
-    /** Reloj analógico con horario, minutero y segundero. */
-    private fun drawClock(c: Canvas, cx: Float, cy: Float, r: Float) {
-        fill.color = panelC
-        c.drawCircle(cx, cy, r, fill)
-        line.color = 0xFF3A4048.toInt(); line.strokeWidth = 3f
-        c.drawCircle(cx, cy, r, line)
-        for (i in 0 until 12) {
-            val a = i * Math.PI / 6
-            val major = i % 3 == 0
-            val l = if (major) r * 0.2f else r * 0.1f
-            line.color = if (major) textC else 0xFF6B747E.toInt()
-            line.strokeWidth = if (major) 5f else 3f
-            val sa = sin(a).toFloat(); val ca = cos(a).toFloat()
-            c.drawLine(cx + (r - 7) * sa, cy - (r - 7) * ca, cx + (r - 7 - l) * sa, cy - (r - 7 - l) * ca, line)
-        }
-        val cal = java.util.Calendar.getInstance()
-        val h = cal.get(java.util.Calendar.HOUR) + cal.get(java.util.Calendar.MINUTE) / 60.0
-        val m = cal.get(java.util.Calendar.MINUTE) + cal.get(java.util.Calendar.SECOND) / 60.0
-        val sec = cal.get(java.util.Calendar.SECOND).toDouble()
-        fun hand(angle: Double, len: Float, w: Float, col: Int) {
-            line.color = col; line.strokeWidth = w
-            c.drawLine(cx, cy, cx + len * sin(angle).toFloat(), cy - len * cos(angle).toFloat(), line)
-        }
-        hand(h * Math.PI / 6, r * 0.5f, 8f, textC)
-        hand(m * Math.PI / 30, r * 0.75f, 5f, textC)
-        hand(sec * Math.PI / 30, r * 0.82f, 2.5f, needleC)
-        fill.color = needleC
-        c.drawCircle(cx, cy, 6f, fill)
+    /** Reloj digital grande con la fecha debajo (solo cambia una vez por minuto). */
+    private fun drawDigitalClock(c: Canvas, cx: Float) {
+        val now = java.util.Date()
+        val es = java.util.Locale("es", "CO")
+        txt(c, java.text.SimpleDateFormat("HH:mm", es).format(now), cx, 150f, 100f, textC, true, Paint.Align.CENTER)
+        val day = java.text.SimpleDateFormat("EEE d MMM", es).format(now).replace(".", "")
+        txt(c, day, cx, 192f, 26f, dimC, align = Paint.Align.CENTER)
     }
 
     /** Presiones junto a cada llanta, por fuera del carro (izquierda alineada hacia el carro). */
@@ -376,7 +374,8 @@ class DashView(ctx: Context) : View(ctx) {
             val y = (e.y - oy) / sc
             when {
                 x > 900 && y < 90 -> onSettings?.invoke()
-                y > 560 -> go(if (x < 500) -1 else 1) // tocar los puntitos también cambia
+                x < 110 && y > 500 -> onHome?.invoke()
+                y > 560 && x in 420f..580f -> go(if (x < 500) -1 else 1) // tocar los puntitos también cambia
             }
             return true
         }

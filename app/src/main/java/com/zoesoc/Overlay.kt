@@ -22,6 +22,7 @@ class Overlay(private val ctx: Context) {
     private val wm = ctx.getSystemService(WindowManager::class.java)
     private val prefs = Prefs(ctx)
     private var view: BubbleView? = null
+    private var params: WindowManager.LayoutParams? = null
 
     @SuppressLint("ClickableViewAccessibility")
     fun show() {
@@ -42,6 +43,7 @@ class Overlay(private val ctx: Context) {
         try {
             wm.addView(v, p)
             view = v
+            params = p
         } catch (e: Exception) {
             ZoeState.log("No pude mostrar la burbuja: ${e.message}")
         }
@@ -52,8 +54,17 @@ class Overlay(private val ctx: Context) {
         v.data = d
         v.refPsi = prefs.refPsi
         v.lightsMode = prefs.lightsMode
-        if (v.status != status && (v.status == "OK" || status == "OK")) v.requestLayout()
+        val oldW = v.width
         v.status = status
+        // El ancho se ajusta al contenido; se mantiene fijo el borde derecho.
+        val newW = v.widthPx()
+        val p = params
+        if (oldW > 0 && newW != oldW && p != null) {
+            p.x += oldW - newW
+            prefs.bubbleX = p.x
+            try { wm.updateViewLayout(v, p) } catch (e: Exception) { }
+        }
+        v.requestLayout()
         v.alpha = if (d == null || System.currentTimeMillis() - d.time > 120_000) 0.6f else 1f
         v.invalidate()
     }
@@ -62,6 +73,7 @@ class Overlay(private val ctx: Context) {
         val v = view ?: return
         try { wm.removeView(v) } catch (e: Exception) { }
         view = null
+        params = null
     }
 
     private inner class Drag(private val p: WindowManager.LayoutParams) : View.OnTouchListener {
@@ -135,7 +147,37 @@ class BubbleView(ctx: Context) : View(ctx) {
 
     private val tick = Runnable { invalidate() }
 
-    fun widthPx(): Int = dp(if (compact) 100f else 168f).roundToInt()
+    /** Ancho justo para lo que se muestra (sin espacio sobrante a la derecha). */
+    fun widthPx(): Int {
+        val d = data
+        val s = d?.displaySoc
+        if (compact) {
+            num.textSize = sp(28f)
+            val t = s?.let { "${it.roundToInt()}%" } ?: "--%"
+            val st = if (status != "OK") { small.textSize = sp(12f); small.measureText(status.take(14)) } else 0f
+            return (dp(10f) + maxOf(num.measureText(t), st) + dp(10f)).roundToInt()
+        }
+        var w: Float
+        if (s != null) {
+            val (i, dec) = Fmt.socParts(s)
+            num.textSize = sp(30f); w = num.measureText(i)
+            num.textSize = sp(17f); w += num.measureText(",$dec")
+            num.textSize = sp(19f); w += num.measureText("%")
+        } else {
+            num.textSize = sp(30f); w = num.measureText("--%")
+        }
+        if (d?.charging == true) w += dp(18f)
+        small.textSize = sp(12f)
+        val sub = when {
+            status != "OK" -> small.measureText(status.take(14))
+            d?.charging == true -> maxOf(
+                run { num.textSize = sp(16f); num.measureText((d!!.chargingKw?.let { Fmt.f(it, 1) } ?: "--") + " kW") },
+                small.measureText("100 % · 9 h 59"),
+            )
+            else -> run { num.textSize = sp(21f); dp(15f) + num.measureText("-10 °C") }
+        }
+        return (dp(68f) + maxOf(w, sub) + dp(10f)).roundToInt()
+    }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val extra = if (status != "OK") 16f else 0f
@@ -154,9 +196,13 @@ class BubbleView(ctx: Context) : View(ctx) {
 
         if (compact) {
             num.textSize = sp(28f)
-            c.drawText(s?.let { "${it.roundToInt()}%" } ?: "--%", dp(10f), dp(36f), num)
+            // Centrado vertical exacto según la altura real de los números.
+            val fm = num.fontMetrics
+            val boxH = dp(48f)
+            val base = boxH / 2 - (fm.ascent + fm.descent) / 2
+            c.drawText(s?.let { "${it.roundToInt()}%" } ?: "--%", dp(10f), base, num)
             small.textSize = sp(12f)
-            if (status != "OK") c.drawText(status.take(14), dp(10f), dp(56f), small)
+            if (status != "OK") c.drawText(status.take(14), dp(10f), dp(60f), small)
             return
         }
 
@@ -211,16 +257,16 @@ class BubbleView(ctx: Context) : View(ctx) {
             }
             else -> d?.tempC?.let {
                 // termómetro + temperatura grande
-                val tx = x0; val ty = dp(58f)
-                therm.strokeWidth = dp(1.3f)
-                c.drawRoundRect(tx + dp(3f), ty, tx + dp(6.5f), ty + dp(11f), dp(1.7f), dp(1.7f), therm)
+                val tx = x0; val ty = dp(57f)
+                therm.strokeWidth = dp(1.5f)
+                c.drawRoundRect(tx + dp(3f), ty, tx + dp(7f), ty + dp(13f), dp(2f), dp(2f), therm)
                 val tc = Colors.batTemp(it)
                 therm.color = tc
                 thermFill.color = tc
-                c.drawCircle(tx + dp(4.75f), ty + dp(13.5f), dp(3.2f), thermFill)
-                c.drawRect(tx + dp(4.25f), ty + dp(4f), tx + dp(5.25f), ty + dp(12f), thermFill)
-                num.textSize = sp(17f); num.color = tc
-                c.drawText(Fmt.f(it, 0) + " °C", tx + dp(13f), dp(74f), num)
+                c.drawCircle(tx + dp(5f), ty + dp(15.5f), dp(3.8f), thermFill)
+                c.drawRect(tx + dp(4.4f), ty + dp(4f), tx + dp(5.6f), ty + dp(14f), thermFill)
+                num.textSize = sp(21f); num.color = tc
+                c.drawText(Fmt.f(it, 0) + " °C", tx + dp(15f), dp(77f), num)
             }
         }
         removeCallbacks(tick)
