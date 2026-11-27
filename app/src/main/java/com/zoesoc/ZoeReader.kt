@@ -183,7 +183,11 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
             }
             else -> {
                 // Tramas lentas, una por vuelta.
-                when (turn++ % 3) {
+                // Cargando no se leen las llantas (quieto no transmiten): queda el último valor.
+                val charging = (chg ?: 0.0) > 0.3
+                var t = turn++ % 3
+                if (charging && t == 0) t = turn++ % 3
+                when (t) {
                     0 -> tryOr("673") {
                         val f = elm.freeFrame("673", 1200)
                         val t = Tires(psi(f, 40), psi(f, 32), psi(f, 24), psi(f, 16))

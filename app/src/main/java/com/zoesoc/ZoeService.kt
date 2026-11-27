@@ -84,17 +84,23 @@ class ZoeService : Service() {
                 while (running) {
                     try {
                         if (ZoeState.appVisible) {
-                            // App abierta: velocidad y potencia, y un pedacito de la batería, sin parar.
-                            val (sp, pw) = reader.fast()
-                            if (sp != null || pw != null) {
-                                speed = sp ?: speed; power = pw ?: power; fastTime = System.currentTimeMillis()
+                            // Cargando: no se lee velocidad ni potencia (no se usan); solo la batería.
+                            val charging = reader.snapshot().charging
+                            if (!charging) {
+                                // App abierta: velocidad y potencia, y un pedacito de la batería, sin parar.
+                                val (sp, pw) = reader.fast()
+                                if (sp != null || pw != null) {
+                                    speed = sp ?: speed; power = pw ?: power; fastTime = System.currentTimeMillis()
+                                }
+                            } else {
+                                speed = 0.0; power = null
                             }
                             // La batería, cada dos vueltas: menos tráfico, la velocidad sigue fluida (~3 por segundo).
-                            val done = if (fastTurn++ % 2 == 0) reader.step() else false
+                            val done = if (charging || fastTurn++ % 2 == 0) reader.step() else false
                             val d = withLive(reader.snapshot())
                             if (done) History.onData(this, d)
                             ZoeState.publish(d, "OK")
-                            if (!pause(60)) break
+                            if (!pause(if (charging) 300L else 60L)) break
                         } else {
                             // Solo la burbuja: lectura completa cada 10 s.
                             if (System.currentTimeMillis() - lastFull >= FULL_MS) {
