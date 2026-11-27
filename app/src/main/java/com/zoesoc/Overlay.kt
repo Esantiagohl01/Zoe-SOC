@@ -126,20 +126,20 @@ class BubbleView(ctx: Context) : View(ctx) {
     private val lamp = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF9FD4FF.toInt() }
     private val tail = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE24B4A.toInt() }
 
-    // Silueta redondeada estilo Zoe (frente a la izquierda), dibujada en un espacio de 100 × 40.
+    // Silueta corta y alta estilo Zoe (frente a la izquierda), dibujada en un espacio de 90 × 40.
     private val carPath = Path().apply {
-        moveTo(4f, 31f); lineTo(3f, 26f)
+        moveTo(4f, 31f); lineTo(3f, 25f)
         quadTo(3f, 19f, 9f, 18f)                       // nariz redonda
-        cubicTo(16f, 17f, 20f, 16f, 24f, 13f)          // capó corto
-        cubicTo(30f, 8f, 36f, 3.5f, 44f, 3f)           // parabrisas muy inclinado
-        cubicTo(60f, 1f, 76f, 1.5f, 85f, 7f)           // techo en arco
-        quadTo(93f, 11f, 95f, 20f)                     // portón trasero curvo
-        lineTo(97f, 27f); quadTo(97f, 31f, 94f, 31f)
+        cubicTo(14f, 17f, 18f, 16f, 22f, 13f)          // capó corto
+        cubicTo(27f, 7f, 32f, 3f, 40f, 2.5f)           // parabrisas inclinado
+        cubicTo(55f, 1.5f, 68f, 2f, 76f, 5f)           // techo
+        cubicTo(82f, 7f, 85f, 11f, 86f, 18f)           // cola corta, casi vertical
+        lineTo(87f, 27f); quadTo(87f, 31f, 84f, 31f)
         close()
     }
     private val glassPath = Path().apply {
-        moveTo(28f, 15f); cubicTo(33f, 10f, 38f, 6.5f, 45f, 6f); lineTo(57f, 5.6f); lineTo(57f, 15f); close()
-        moveTo(60f, 15f); lineTo(60f, 5.6f); lineTo(72f, 5.8f); cubicTo(79f, 6.5f, 84f, 9.5f, 87f, 15f); close()
+        moveTo(26f, 14f); cubicTo(30f, 9f, 35f, 5.5f, 41f, 5f); lineTo(51f, 5f); lineTo(51f, 14f); close()
+        moveTo(54f, 14f); lineTo(54f, 5f); lineTo(65f, 5f); cubicTo(72f, 5.5f, 78f, 8f, 81f, 14f); close()
     }
 
     private fun socColor(): Int {
@@ -173,7 +173,7 @@ class BubbleView(ctx: Context) : View(ctx) {
             c.drawText(pct, pad, dp(34f), pctPaint)
             barsTop = dp(42f)
         } else {
-            drawCar(c, pad, dp(12f), dp(58f))
+            drawCar(c, pad + dp(2f), dp(11f), dp(52f))
             c.drawText(pct, pad + dp(66f), dp(36f), pctPaint)
             barsTop = dp(46f)
         }
@@ -189,15 +189,15 @@ class BubbleView(ctx: Context) : View(ctx) {
     }
 
     private fun drawCar(c: Canvas, x: Float, y: Float, width: Float) {
-        val k = width / 100f
+        val k = width / 90f
         c.save()
         c.translate(x, y)
         c.scale(k, k)
         c.drawPath(carPath, body)
         c.drawPath(glassPath, glass)
-        c.drawOval(4.5f, 19.5f, 12f, 22.5f, lamp)
-        c.drawRoundRect(93.5f, 16f, 96f, 21f, 1f, 1f, tail)
-        for (cx in floatArrayOf(21f, 79f)) {
+        c.drawOval(4.5f, 19.5f, 11.5f, 22.5f, lamp)
+        c.drawRoundRect(84.5f, 14f, 86.5f, 19f, 1f, 1f, tail)
+        for (cx in floatArrayOf(19f, 71f)) {
             c.drawCircle(cx, 31f, 8.5f, tire)
             c.drawCircle(cx, 31f, 3.8f, hub)
         }
