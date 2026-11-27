@@ -2,6 +2,7 @@ package com.zoesoc
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -10,6 +11,7 @@ import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.provider.Settings
 import android.util.TypedValue
+import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -76,14 +78,44 @@ class Overlay(private val ctx: Context) {
         params = null
     }
 
+    /** Arrastrar mueve la burbuja; un toque abre el tablero; doble toque alterna completa/compacta. */
     private inner class Drag(private val p: WindowManager.LayoutParams) : View.OnTouchListener {
         private var sx = 0
         private var sy = 0
         private var tx = 0f
         private var ty = 0f
         private var moved = false
+        private var target: View? = null
+
+        private val taps = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                if (moved) return false
+                ctx.startActivity(
+                    Intent(ctx, MainActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+                )
+                return true
+            }
+
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                val v = target as? BubbleView ?: return false
+                // Cambia de tamaño manteniendo fijo el borde derecho.
+                val oldW = v.width
+                v.compact = !v.compact
+                prefs.compact = v.compact
+                p.x += oldW - v.widthPx()
+                prefs.bubbleX = p.x
+                try { wm.updateViewLayout(v, p) } catch (x: Exception) { }
+                v.requestLayout()
+                v.invalidate()
+                return true
+            }
+        })
 
         override fun onTouch(v: View, e: MotionEvent): Boolean {
+            target = v
             when (e.action) {
                 MotionEvent.ACTION_DOWN -> {
                     sx = p.x; sy = p.y; tx = e.rawX; ty = e.rawY; moved = false
@@ -102,19 +134,10 @@ class Overlay(private val ctx: Context) {
                     if (moved) {
                         prefs.bubbleX = p.x
                         prefs.bubbleY = p.y
-                    } else if (v is BubbleView) {
-                        // Cambia de tamaño manteniendo fijo el borde derecho.
-                        val oldW = v.width
-                        v.compact = !v.compact
-                        prefs.compact = v.compact
-                        p.x += oldW - v.widthPx()
-                        prefs.bubbleX = p.x
-                        try { wm.updateViewLayout(v, p) } catch (x: Exception) { }
-                        v.requestLayout()
-                        v.invalidate()
                     }
                 }
             }
+            if (!moved) taps.onTouchEvent(e) else if (e.action == MotionEvent.ACTION_UP) taps.onTouchEvent(MotionEvent.obtain(e).apply { action = MotionEvent.ACTION_CANCEL })
             return true
         }
     }
@@ -208,10 +231,7 @@ class BubbleView(ctx: Context) : View(ctx) {
 
         val charging = d?.charging == true
         // Latido suave de la batería mientras carga.
-        val alpha = if (charging) {
-            val t = (System.currentTimeMillis() % 1600L) / 1600.0
-            (150 + 105 * (0.5 + 0.5 * kotlin.math.cos(t * 2 * Math.PI))).toInt()
-        } else 255
+        val alpha = 255 // sin latido: el rayo y el color ya indican que carga
         val carH = dp(84f)
         CarArt.draw(
             c, dp(12f), dp(17f), carH, s, col, CarArt.tireColors(d, refPsi),
@@ -270,6 +290,5 @@ class BubbleView(ctx: Context) : View(ctx) {
             }
         }
         removeCallbacks(tick)
-        if (charging) postDelayed(tick, 60L)
     }
 }

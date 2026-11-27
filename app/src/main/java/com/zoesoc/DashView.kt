@@ -121,8 +121,12 @@ class DashView(ctx: Context) : View(ctx) {
     private fun live(d: ZoeData?) = d != null && System.currentTimeMillis() - d.fastTime < 10_000
     private fun speed(d: ZoeData?) = if (live(d)) d?.speedKmh else null
     private fun power(d: ZoeData?) = if (live(d)) d?.powerKw else null
+    /** Última vez que se tocó la pantalla: cargando, tras 5 min sin tocar, las animaciones se detienen. */
+    private var lastTouch = System.currentTimeMillis()
+    private fun chargeAnim(d: ZoeData?) = d?.charging == true && System.currentTimeMillis() - lastTouch < 5 * 60_000L
+
     private fun pulseAlpha(d: ZoeData?): Int {
-        if (d?.charging != true) return 255
+        if (!chargeAnim(d)) return 255
         val t = (System.currentTimeMillis() % 1600L) / 1600.0
         return (150 + 105 * (0.5 + 0.5 * cos(t * 2 * Math.PI))).toInt()
     }
@@ -147,7 +151,8 @@ class DashView(ctx: Context) : View(ctx) {
         // Un solo temporizador: animación de carga, o cambio de minuto del reloj.
         // Un solo temporizador, solo para animaciones (carga o señal parpadeando).
         removeCallbacks(tick)
-        if (page == 0 && (d?.charging == true || limiter.over)) postDelayed(tick, 50L)
+        // ~9 cuadros por segundo: se ve suave y la caja trabaja menos de la mitad que a 20.
+        if (page == 0 && (chargeAnim(d) || limiter.over)) postDelayed(tick, ANIM_MS)
     }
 
     private fun drawHeader(c: Canvas, d: ZoeData?) {
@@ -197,25 +202,25 @@ class DashView(ctx: Context) : View(ctx) {
     /** Teléfono blanco abajo, al otro lado del carro (a espejo de la casita): abre AutoKit (CarPlay). */
     private fun drawAutoKit(c: Canvas) {
         if (!hasAutoKit || page != 0) return // en Detalle el carro ocupa ese lugar
-        val x = PHONE_X; val y = 548f
+        val x = PHONE_X; val y = 548f; val k = 1.3f
         fill.color = textC
-        c.drawRoundRect(x - 16, y - 26, x + 16, y + 26, 8f, 8f, fill)
+        c.drawRoundRect(x - 16 * k, y - 26 * k, x + 16 * k, y + 26 * k, 8f * k, 8f * k, fill)
         fill.color = bgC
-        c.drawRoundRect(x - 12, y - 19, x + 12, y + 14, 3f, 3f, fill) // pantalla
-        c.drawCircle(x, y + 20, 3f, fill)                              // botón
+        c.drawRoundRect(x - 12 * k, y - 19 * k, x + 12 * k, y + 14 * k, 3f * k, 3f * k, fill) // pantalla
+        c.drawCircle(x, y + 20 * k, 3f * k, fill)                                          // botón
     }
 
-    /** Casita blanca abajo a la izquierda: vuelve al inicio del Tbox. */
+    /** Casita blanca abajo a la izquierda (más grande, fácil de tocar): vuelve al inicio del Tbox. */
     private fun drawHome(c: Canvas) {
-        val x = 50f; val y = 556f
+        val x = 54f; val y = 550f; val k = 1.3f
         val house = Path().apply {
-            moveTo(x, y - 30); lineTo(x + 27, y - 6); lineTo(x + 18, y - 6); lineTo(x + 18, y + 17)
-            lineTo(x - 18, y + 17); lineTo(x - 18, y - 6); lineTo(x - 27, y - 6); close()
+            moveTo(x, y - 30 * k); lineTo(x + 27 * k, y - 6 * k); lineTo(x + 18 * k, y - 6 * k); lineTo(x + 18 * k, y + 17 * k)
+            lineTo(x - 18 * k, y + 17 * k); lineTo(x - 18 * k, y - 6 * k); lineTo(x - 27 * k, y - 6 * k); close()
         }
         fill.color = textC
         c.drawPath(house, fill)
         fill.color = bgC
-        c.drawRoundRect(x - 6, y + 2, x + 6, y + 17, 3f, 3f, fill) // puerta
+        c.drawRoundRect(x - 6 * k, y + 2 * k, x + 6 * k, y + 17 * k, 3f * k, 3f * k, fill) // puerta
     }
 
     private fun drawDots(c: Canvas) {
@@ -271,7 +276,7 @@ class DashView(ctx: Context) : View(ctx) {
             c.save()
             c.clipRect(bx0, 400f, fx, 424f)
             fill.color = 0x59FFFFFF
-            val off = (System.currentTimeMillis() % 1000L) / 1000f * 48f
+            val off = if (chargeAnim(d)) (System.currentTimeMillis() % 1000L) / 1000f * 48f else 0f
             var sx = bx0 - 48f + off
             while (sx < fx) { c.drawRect(sx, 400f, sx + 14f, 424f, fill); sx += 48f }
             c.restore()
@@ -376,18 +381,39 @@ class DashView(ctx: Context) : View(ctx) {
     }
 
     /** Bloque "Viaje": km grandes y, debajo, kWh y consumo del viaje (desde que se prendió el carro). */
+    private val inkR = android.graphics.Rect()
+
+    /** Borde izquierdo y derecho reales de la tinta (sin espacios ni márgenes de la fuente). */
+    private fun ink(str: String, size: Float, bold: Boolean): Pair<Float, Float> {
+        tp.textSize = size; tp.typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+        tp.getTextBounds(str, 0, str.length, inkR)
+        return inkR.left.toFloat() to inkR.right.toFloat()
+    }
+
+    /** Texto centrado por su tinta visible, no por el ancho tipográfico. */
+    private fun txtInk(c: Canvas, str: String, cx: Float, y: Float, size: Float, color: Int, bold: Boolean = false) {
+        val (l, r) = ink(str, size, bold)
+        txt(c, str, cx - (l + r) / 2, y, size, color, bold)
+    }
+
     private fun drawTrip(c: Canvas, cx: Float, d: ZoeData?) {
-        txt(c, "Viaje", cx, 84f, 26f, dimC, align = Paint.Align.CENTER)
+        txtInk(c, "Viaje", cx, 84f, 26f, dimC)
         val km = d?.tripKm
         val kStr = km?.let { Fmt.f(it, 1) } ?: "--"
-        val wNum = tw(kStr, 84f, true); val wUnit = tw(" km", 34f, false)
-        val x = cx - (wNum + wUnit) / 2
+        val wNum = tw(kStr, 84f, true)
+        val gap = tw(" ", 34f, false)
+        val (nl, _) = ink(kStr, 84f, true)
+        val (_, ur) = ink("km", 34f, false)
+        // Centra el grupo "12,3 km" por la tinta: desde el primer trazo del número hasta el final de "km".
+        val left = nl
+        val right = wNum + gap + ur
+        val x = cx - (left + right) / 2
         txt(c, kStr, x, 163f, 84f, textC, true)
-        txt(c, " km", x + wNum, 163f, 34f, 0xFFC8D0D8.toInt())
+        txt(c, "km", x + wNum + gap, 163f, 34f, 0xFFC8D0D8.toInt())
         val kwh = d?.tripKwh
         val cons = if (km != null && kwh != null && km >= 0.5) Fmt.f(kwh / km * 100, 1) else "--"
         val line2 = (kwh?.let { Fmt.f(it, 1) } ?: "--") + " kWh · " + cons + " kWh/100"
-        txt(c, line2, cx, 208f, 28f, 0xFFC8D0D8.toInt(), align = Paint.Align.CENTER)
+        txtInk(c, line2, cx, 208f, 28f, 0xFFC8D0D8.toInt())
     }
 
     /** Presiones junto a cada llanta, por fuera del carro (izquierda alineada hacia el carro). */
@@ -422,8 +448,8 @@ class DashView(ctx: Context) : View(ctx) {
             when {
                 x > 900 && y < 90 -> onSettings?.invoke()
                 page == 0 && data?.charging != true && abs(x - SIGN_X) < 60 && abs(y - SIGN_Y) < 60 -> { limiter.cycle(); invalidate() }
-                x < 110 && y > 515 -> onHome?.invoke()
-                page == 0 && hasAutoKit && x in (PHONE_X - 45f)..(PHONE_X + 45f) && y > 505 -> onAutoKit?.invoke()
+                x < 120 && y > 500 -> onHome?.invoke()
+                page == 0 && hasAutoKit && x in (PHONE_X - 55f)..(PHONE_X + 55f) && y > 495 -> onAutoKit?.invoke()
                 y > 560 && x in 420f..580f -> go(if (x < 500) -1 else 1) // tocar los puntitos también cambia
             }
             return true
@@ -438,6 +464,8 @@ class DashView(ctx: Context) : View(ctx) {
 
     companion object {
         const val PAGES = 2
+        /** Intervalo de las animaciones (latido de carga, flujo, señal parpadeando). */
+        const val ANIM_MS = 110L
         /** Posición del teléfono: a la derecha del carro, a la misma altura que la casita. */
         const val PHONE_X = 418f
         /** Señal del limitador, a la derecha de la velocidad. */
@@ -445,5 +473,12 @@ class DashView(ctx: Context) : View(ctx) {
         const val SIGN_Y = 358f
     }
 
-    override fun onTouchEvent(event: MotionEvent): Boolean = gestures.onTouchEvent(event) || super.onTouchEvent(event)
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.action == MotionEvent.ACTION_DOWN) {
+            val wasIdle = !chargeAnim(data)
+            lastTouch = System.currentTimeMillis()
+            if (wasIdle) invalidate() // reanuda las animaciones
+        }
+        return gestures.onTouchEvent(event) || super.onTouchEvent(event)
+    }
 }

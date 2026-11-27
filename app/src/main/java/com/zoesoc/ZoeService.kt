@@ -123,7 +123,9 @@ class ZoeService : Service() {
                                 }
                             }
                             // Solo la burbuja: lectura completa cada 10 s.
-                            if (System.currentTimeMillis() - lastFull >= FULL_MS) {
+                            // Cargando, la batería cambia lento: cada 20 s basta.
+                            val every = if (reader.snapshot().charging) 2 * FULL_MS else FULL_MS
+                            if (System.currentTimeMillis() - lastFull >= every) {
                                 val d = withLive(reader.read())
                                 lastFull = System.currentTimeMillis()
                                 History.onData(this, d)
