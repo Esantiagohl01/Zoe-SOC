@@ -121,6 +121,8 @@ class DashView(ctx: Context) : View(ctx) {
     }
     private fun eta(d: ZoeData, target: Double): String? = d.minutesTo(target)?.let { Fmt.dur(it) }
 
+    private val tick = Runnable { invalidate() }
+
     // ---------- dibujo ----------
     override fun onDraw(c: Canvas) {
         c.drawColor(bgC)
@@ -132,7 +134,9 @@ class DashView(ctx: Context) : View(ctx) {
         drawHeader(c, d)
         drawDots(c)
         c.restore()
-        if (d?.charging == true && page == 0) postInvalidateDelayed(50)
+        // Un solo temporizador (no se acumulan): animación de carga o segundero del reloj.
+        removeCallbacks(tick)
+        if (page == 0) postDelayed(tick, if (d?.charging == true) 50L else 1000L)
     }
 
     private fun drawHeader(c: Canvas, d: ZoeData?) {
@@ -144,7 +148,6 @@ class DashView(ctx: Context) : View(ctx) {
         }
         val title = if (page == 1) "Detalle" else "Zoe · $st"
         txt(c, title.take(40), 24f, 40f, 26f, dimC)
-        if (d?.climOn == true && page == 0) txt(c, "❄ A/C", 900f, 40f, 26f, subC, align = Paint.Align.RIGHT)
         // Engranaje (abre ajustes)
         val gx = 960f; val gy = 34f
         line.strokeWidth = 5f; line.color = dimC
@@ -166,11 +169,15 @@ class DashView(ctx: Context) : View(ctx) {
     /** B · Digital: carro grande con presiones, SOC, velocidad grande y barra de potencia (o la carga). */
     private fun drawDigital(c: Canvas, d: ZoeData?) {
         val charging = d?.charging == true
-        val carTop = 84f; val carH = 412f
+        // Columna izquierda: reloj analógico arriba y carro más pequeño pegado abajo.
+        val colX = 235f
+        drawClock(c, colX, 138f, 80f)
+        val carH = 292f
         val carW = carH * CarArt.W / CarArt.H
-        val carCx = 120f + carW / 2
-        car(c, carCx, carTop, carH, d, pulseAlpha(d))
-        tirePsi(c, d, carCx - carW / 2 - 12f, carCx + carW / 2 + 12f, carTop, carH, 32f)
+        val carTop = 574f - carH
+        car(c, colX, carTop, carH, d, pulseAlpha(d))
+        // Las presiones van pegadas al borde exterior de cada llanta.
+        tirePsi(c, d, colX - carW / 2 + carW * 0.5f / CarArt.W - 10f, colX - carW / 2 + carW * 59.5f / CarArt.W + 10f, carTop, carH, 30f)
 
         val x0 = 470f
         val s = d?.displaySoc
@@ -179,7 +186,6 @@ class DashView(ctx: Context) : View(ctx) {
 
         val l2 = listOfNotNull(
             d?.extTemp?.let { "Ext. " + Fmt.f(it, 0) + " °C" }, d?.cabinTemp?.let { "Int. " + Fmt.f(it, 0) + " °C" },
-            if (d?.climOn == true) "❄ A/C" else null,
         ).joinToString(" · ")
         // Línea 1: autonomía · Batería + temperatura con color
         val lc = 0xFFC8D0D8.toInt()
@@ -238,7 +244,15 @@ class DashView(ctx: Context) : View(ctx) {
             c.drawLine(zx, 464f, zx, 504f, line)
             val inst = if (live(d)) d?.instantConsumption?.let { Fmt.f(it, 1) } else null
             val avg = d?.avgConsumption?.let { Fmt.f(it, 1) }
-            txt(c, "Inst. ${inst ?: "--"} · Prom. ${avg ?: "--"} kWh/100", x0, 542f, 30f, 0xFFC8D0D8.toInt())
+            // Consumo con unidades: dos bloques "Instantáneo" y "Promedio".
+            fun cons(x: Float, label: String, v: String?) {
+                txt(c, label, x, 526f, 24f, dimC)
+                val vs = v ?: "--"
+                txt(c, vs, x, 562f, 32f, textC, true)
+                txt(c, " kWh/100 km", x + tw(vs, 32f, true), 562f, 22f, 0xFFC8D0D8.toInt())
+            }
+            cons(x0, "Instantáneo", inst)
+            cons(x0 + 250f, "Promedio", avg)
         }
     }
 
@@ -273,9 +287,10 @@ class DashView(ctx: Context) : View(ctx) {
 
         // Llantas
         txt(c, "Llantas (PSI)", 500f, 100f, 26f, dimC, align = Paint.Align.CENTER)
-        val h = 390f; val w = h * CarArt.W / CarArt.H
-        car(c, 500f, 140f, h, d, 255, showPack = false)
-        tirePsi(c, d, 500f - w / 2 - 10f, 500f + w / 2 + 10f, 140f, h, 34f)
+        val h = 360f; val w = h * CarArt.W / CarArt.H
+        val top = 180f
+        car(c, 500f, top, h, d, 255, showPack = false)
+        tirePsi(c, d, 500f - w / 2 + w * 0.5f / CarArt.W - 10f, 500f - w / 2 + w * 59.5f / CarArt.W + 10f, top, h, 34f)
 
         // Cargas
         fill.color = panelC
@@ -298,6 +313,36 @@ class DashView(ctx: Context) : View(ctx) {
         txt(c, "Consumo promedio", 660f, 420f, 26f, dimC)
         txt(c, d?.avgConsumption?.let { Fmt.f(it, 1) + " kWh/100" } ?: "--", 660f, 466f, 38f, textC, true)
         txt(c, "Exterior " + Fmt.temp(d?.extTemp) + " · Interior " + Fmt.temp(d?.cabinTemp), 660f, 520f, 24f, dimC)
+    }
+
+    /** Reloj analógico con horario, minutero y segundero. */
+    private fun drawClock(c: Canvas, cx: Float, cy: Float, r: Float) {
+        fill.color = panelC
+        c.drawCircle(cx, cy, r, fill)
+        line.color = 0xFF3A4048.toInt(); line.strokeWidth = 3f
+        c.drawCircle(cx, cy, r, line)
+        for (i in 0 until 12) {
+            val a = i * Math.PI / 6
+            val major = i % 3 == 0
+            val l = if (major) r * 0.2f else r * 0.1f
+            line.color = if (major) textC else 0xFF6B747E.toInt()
+            line.strokeWidth = if (major) 5f else 3f
+            val sa = sin(a).toFloat(); val ca = cos(a).toFloat()
+            c.drawLine(cx + (r - 7) * sa, cy - (r - 7) * ca, cx + (r - 7 - l) * sa, cy - (r - 7 - l) * ca, line)
+        }
+        val cal = java.util.Calendar.getInstance()
+        val h = cal.get(java.util.Calendar.HOUR) + cal.get(java.util.Calendar.MINUTE) / 60.0
+        val m = cal.get(java.util.Calendar.MINUTE) + cal.get(java.util.Calendar.SECOND) / 60.0
+        val sec = cal.get(java.util.Calendar.SECOND).toDouble()
+        fun hand(angle: Double, len: Float, w: Float, col: Int) {
+            line.color = col; line.strokeWidth = w
+            c.drawLine(cx, cy, cx + len * sin(angle).toFloat(), cy - len * cos(angle).toFloat(), line)
+        }
+        hand(h * Math.PI / 6, r * 0.5f, 8f, textC)
+        hand(m * Math.PI / 30, r * 0.75f, 5f, textC)
+        hand(sec * Math.PI / 30, r * 0.82f, 2.5f, needleC)
+        fill.color = needleC
+        c.drawCircle(cx, cy, 6f, fill)
     }
 
     /** Presiones junto a cada llanta, por fuera del carro (izquierda alineada hacia el carro). */

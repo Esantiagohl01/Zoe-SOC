@@ -75,42 +75,38 @@ class ZoeService : Service() {
                 elm.init()
                 val reader = ZoeReader(elm) { ZoeState.log(it) }
                 ZoeState.publish(null, "Conectado")
-                var cur: ZoeData? = null
-                var lastSlow = 0L
+                var speed: Double? = null
+                var power: Double? = null
+                var fastTime = 0L
+                var lastFull = 0L
+                fun withLive(d: ZoeData) = d.copy(speedKmh = speed, powerKw = power, fastTime = fastTime)
                 while (running) {
-                    // Lectura completa cada N segundos.
-                    // Con la app abierta la lectura completa va cada 30 s como mínimo, para no frenar la velocidad.
-                    val every = if (ZoeState.appVisible) maxOf(prefs.intervalSec, 30) else prefs.intervalSec
-                    if (cur == null || System.currentTimeMillis() - lastSlow >= every * 1000L) {
-                        try {
-                            val prev = cur
-                            val d = reader.read().copy(
-                                speedKmh = prev?.speedKmh, powerKw = prev?.powerKw, fastTime = prev?.fastTime ?: 0L,
-                            )
-                            cur = d
-                            lastSlow = System.currentTimeMillis()
-                            History.onData(this, d)
+                    try {
+                        if (ZoeState.appVisible) {
+                            // App abierta: velocidad y potencia, y un pedacito de la batería, sin parar.
+                            val (sp, pw) = reader.fast()
+                            if (sp != null || pw != null) {
+                                speed = sp ?: speed; power = pw ?: power; fastTime = System.currentTimeMillis()
+                            }
+                            val done = reader.step()
+                            val d = withLive(reader.snapshot())
+                            if (done) History.onData(this, d)
                             ZoeState.publish(d, "OK")
-                        } catch (e: ElmException) {
-                            cur = null
-                            ZoeState.publish(null, "Sin datos: ${e.message}")
-                            if (!pause(20_000)) break
-                            continue
+                            if (!pause(20)) break
+                        } else {
+                            // Solo la burbuja: lectura completa cada 10 s.
+                            if (System.currentTimeMillis() - lastFull >= FULL_MS) {
+                                val d = withLive(reader.read())
+                                lastFull = System.currentTimeMillis()
+                                History.onData(this, d)
+                                ZoeState.publish(d, "OK")
+                            }
+                            if (!pause(500)) break
                         }
-                    }
-                    // Con la app abierta: velocidad y potencia seguido. Si no, solo espera.
-                    val c = cur
-                    if (ZoeState.appVisible && c != null) {
-                        val (sp, pw) = reader.fast()
-                        val u = c.copy(
-                            speedKmh = sp ?: c.speedKmh, powerKw = pw ?: c.powerKw,
-                            fastTime = if (sp != null || pw != null) System.currentTimeMillis() else c.fastTime,
-                        )
-                        cur = u
-                        ZoeState.publish(u, "OK")
-                        if (!pause(30)) break
-                    } else {
-                        if (!pause(1000)) break
+                    } catch (e: ElmException) {
+                        ZoeState.publish(null, "Sin datos: ${e.message}")
+                        lastFull = 0L
+                        if (!pause(20_000)) break
                     }
                 }
             } catch (e: InterruptedException) {
@@ -179,6 +175,7 @@ class ZoeService : Service() {
 
     companion object {
         const val NID = 1
+        const val FULL_MS = 10_000L
         const val CHANNEL = "zoe"
         @Volatile var running = false
 

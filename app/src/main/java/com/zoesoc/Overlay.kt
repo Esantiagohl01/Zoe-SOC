@@ -133,6 +133,8 @@ class BubbleView(ctx: Context) : View(ctx) {
         moveTo(7f, 0f); lineTo(0f, 13f); lineTo(5.5f, 13f); lineTo(4f, 22f); lineTo(12f, 8f); lineTo(6.5f, 8f); lineTo(9f, 0f); close()
     }
 
+    private val tick = Runnable { invalidate() }
+
     fun widthPx(): Int = dp(if (compact) 100f else 168f).roundToInt()
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -164,9 +166,9 @@ class BubbleView(ctx: Context) : View(ctx) {
             val t = (System.currentTimeMillis() % 1600L) / 1600.0
             (150 + 105 * (0.5 + 0.5 * kotlin.math.cos(t * 2 * Math.PI))).toInt()
         } else 255
-        val carH = dp(94f)
+        val carH = dp(84f)
         CarArt.draw(
-            c, dp(10f), dp(5f), carH, s, col, CarArt.tireColors(d, refPsi),
+            c, dp(12f), dp(17f), carH, s, col, CarArt.tireColors(d, refPsi),
             packAlpha = alpha, lights = CarArt.lightsOn(d, lightsMode),
         )
 
@@ -221,6 +223,7 @@ class BubbleView(ctx: Context) : View(ctx) {
                 c.drawText(Fmt.f(it, 0) + " °C", tx + dp(13f), dp(74f), num)
             }
         }
-        if (charging) postInvalidateDelayed(60)
+        removeCallbacks(tick)
+        if (charging) postDelayed(tick, 60L)
     }
 }

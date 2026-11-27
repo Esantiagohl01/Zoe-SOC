@@ -94,7 +94,6 @@ class SettingsActivity : Activity() {
         add(check("Luces siempre encendidas (si no, siguen al carro)", prefs.lightsMode == 1) {
             prefs.lightsMode = if (it) 1 else 0; ZoeState.touch()
         })
-        add(numberField("Leer la batería cada (segundos):", prefs.intervalSec) { prefs.intervalSec = it.coerceIn(5, 300) })
         add(numberField("Presión recomendada (PSI):", prefs.refPsi) { prefs.refPsi = it.coerceIn(20, 60); ZoeState.touch() })
         val btns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         btns.addView(Button(this).apply { text = "Iniciar"; setOnClickListener { startReading() } },

@@ -62,28 +62,38 @@ data class ZoeData(
  * Tramas libres (solo se escuchan):
  *  654 bit 2 enchufe conectado, 52-61 ×0.1 consumo promedio · 42E 56-63 ×0.3 potencia de carga
  *  427 49-57 ×0.1 energía disponible · 673 presiones ×13.725 mbar (FL 40, FR 32, RL 24, RR 16)
- *  5D7 0-15 ×0.01 velocidad · 1FD 48-55 (x−80) potencia kW
- *  656 48-55 (x−40) temperatura exterior · 42A 48-50 modo del clima
+ *  5D7 0-15 ×0.01 velocidad (×1,064 para igualar el tablero) · 1FD 48-55 (x−80) potencia kW
+ *  656 48-55 (x−40) temperatura exterior
  *  5DE byte 0 bit 0x04 luces (dato del Smart EQ, misma plataforma; no está en CanZE)
  * Clima 744/764: 2121 26-35 (x−400)×0.1 temperatura interior
  */
 class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
+    // Último valor bueno de cada dato: si una lectura falla, se conserva el anterior (no parpadea).
+    private var usoc: Double? = null
+    private var current: Double? = null
+    private var real: Double? = null
+    private var temp: Double? = null
+    private var tempAt = 0L
+    private var range: Int? = null
+    private var v12: Double? = null
+    private var cabin: Double? = null
     private var soh: Double? = null
     private var sohAt = 0L
     private var cellDiff: Int? = null
     private var cellAt = 0L
+    private var plugged: Boolean? = null
+    private var chg: Double? = null
     private var tires: Tires? = null
     private var avgCons: Double? = null
     private var avail: Double? = null
     private var ext: Double? = null
-    private var clim: Boolean? = null
     private var lights: Boolean? = null
+
+    private var stepIdx = 0
+    private var lastSpeed: Double? = null
+    private var lastSpeedAt = 0L
     private var turn = 0
-    // Últimos valores buenos, para que no parpadeen si una lectura falla.
-    private var lastTemp: Double? = null
-    private var lastRange: Int? = null
-    private var lastV12: Double? = null
-    private var lastCabin: Double? = null
+    private var answeredInCycle = 0
 
     private inline fun <T> tryOr(name: String, f: () -> T): T? = try {
         f()
@@ -94,94 +104,113 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
 
     private inline fun <T> quiet(f: () -> T): T? = try { f() } catch (e: ElmException) { null }
 
+    /** Una lectura completa (para cuando solo está la burbuja). */
     fun read(): ZoeData {
-        var answered = 0
-        val now = System.currentTimeMillis()
-
-        var usoc: Double? = null
-        var current: Double? = null
-        tryOr("2101") {
-            val b = elm.request(LBC_TX, LBC_RX, "2101")
-            answered++
-            usoc = Bits.field(b, 288, 319, 0.0001, 0.0)
-            current = Bits.field(b, 16, 31, 0.1, 5000.0)
-        }
-        var real = tryOr("2103") { Bits.field(elm.request(LBC_TX, LBC_RX, "2103"), 192, 207, 0.01, 0.0) }
-        if (real != null) answered++
-        val tempRead = tryOr("2104") { Bits.field(elm.request(LBC_TX, LBC_RX, "2104"), 600, 607, 1.0, 40.0) }
-        if (tempRead != null) { answered++; lastTemp = tempRead }
-        val temp = tempRead ?: lastTemp
-        if (soh == null || now - sohAt > SLOW_MS) {
-            tryOr("2161") { Bits.field(elm.request(LBC_TX, LBC_RX, "2161"), 72, 79, 0.5, 0.0) }?.let {
-                soh = it; sohAt = now; answered++
-            }
-        }
-        if (cellDiff == null || now - cellAt > SLOW_MS) {
-            tryOr("celdas") { cellSpread() }?.let { cellDiff = it; cellAt = now }
-        }
-        var range = tryOr("223451") {
-            val b = elm.request(EVC_TX, EVC_RX, "223451")
-            if (b.size < 5) throw ElmException("respuesta corta")
-            Bits.get(b, (b.size - 2) * 8, b.size * 8 - 1).toInt()
-        }
-        if (range != null) answered++
-        tryOr("222005") { Bits.field(elm.request(EVC_TX, EVC_RX, "222005"), 24, 39, 0.01, 0.0) }
-            ?.takeIf { it in 5.0..20.0 }?.let { lastV12 = it }
-        val v12 = lastV12
-
-        if (answered == 0) throw ElmException("el carro no responde (¿apagado?)")
-
-        tryOr("2121") {
-            Bits.field(elm.request(HVAC_TX, HVAC_RX, "2121"), 26, 35, 0.1, 400.0)
-        }?.takeIf { it in -40.0..80.0 }?.let { lastCabin = it }
-        val cabin = lastCabin
-
-        // Tramas libres: si alguna no llega, se conserva el último valor.
-        var plugged: Boolean? = null
-        tryOr("654") {
-            val f = elm.freeFrame("654", 1200)
-            plugged = Bits.get(f, 2, 2) == 1L
-            val a = Bits.field(f, 52, 61, 0.1, 0.0)
-            if (a in 1.0..60.0) avgCons = a
-        }
-        var chg: Double? = null
-        if (plugged == true) chg = tryOr("42E") { Bits.field(elm.freeFrame("42E", 600), 56, 63, 0.3, 0.0) }
-        // Luces: si la trama no existe en este carro, queda null y se dibujan encendidas.
-        quiet { lights = Bits.get(elm.freeFrame("5DE", 500), 5, 5) == 1L }
-        // Las demás tramas lentas se turnan, una por ciclo, para que cada lectura sea corta.
-        when (turn++ % 4) {
-            0 -> tryOr("673") {
-                val f = elm.freeFrame("673", 1200)
-                val t = Tires(psi(f, 40), psi(f, 32), psi(f, 24), psi(f, 16))
-                if (t.fl != null || t.fr != null || t.rl != null || t.rr != null) tires = t
-            }
-            1 -> tryOr("656") {
-                val e = Bits.field(elm.freeFrame("656", 1200), 48, 55, 1.0, 40.0)
-                if (e in -40.0..70.0) ext = e
-            }
-            2 -> tryOr("427") {
-                val e = Bits.field(elm.freeFrame("427", 600), 49, 57, 0.1, 0.0)
-                if (e in 0.5..60.0) avail = e
-            }
-            else -> tryOr("42A") { clim = Bits.get(elm.freeFrame("42A", 600), 48, 50) != 0L }
-        }
-
-        if (usoc != null && (usoc!! < 0 || usoc!! > 100)) { log("USOC fuera de rango: $usoc"); usoc = null }
-        if (real != null && (real < 0 || real > 100)) { log("SOC real fuera de rango: $real"); real = null }
-        if (range != null && range > 1000) range = null
-        if (range != null) lastRange = range else range = lastRange
-
-        return ZoeData(
-            soc = usoc, realSoc = real, soh = soh, tempC = temp, currentA = current, rangeKm = range,
-            v12 = v12, cellDiffMv = cellDiff, plugged = plugged, chargingKw = chg,
-            availKwh = avail, avgConsumption = avgCons, tires = tires,
-            extTemp = ext, cabinTemp = cabin, climOn = clim, lightsOn = lights,
-        )
+        while (!step()) { /* sigue con el siguiente pedacito */ }
+        return snapshot()
     }
+
+    /**
+     * Hace UN pedacito de la lectura (una petición o una trama) y devuelve true cuando se completó una vuelta.
+     * Con la app abierta se intercala con la velocidad para que esta no se congele.
+     * Al terminar una vuelta sin ninguna respuesta del carro, lanza ElmException.
+     */
+    fun step(): Boolean {
+        val now = System.currentTimeMillis()
+        when (stepIdx) {
+            0 -> tryOr("2101") {
+                val b = elm.request(LBC_TX, LBC_RX, "2101")
+                answeredInCycle++
+                Bits.field(b, 288, 319, 0.0001, 0.0).takeIf { it in 0.0..100.0 }?.let { usoc = it }
+                current = Bits.field(b, 16, 31, 0.1, 5000.0)
+            }
+            1 -> tryOr("2103") { Bits.field(elm.request(LBC_TX, LBC_RX, "2103"), 192, 207, 0.01, 0.0) }
+                ?.let { answeredInCycle++; if (it in 0.0..100.0) real = it }
+            2 -> {
+                val every = if (chg != null && chg!! > 0.3) 60_000L else SLOW_MS
+                if (temp == null || now - tempAt > every) {
+                    tryOr("2104") { Bits.field(elm.request(LBC_TX, LBC_RX, "2104"), 600, 607, 1.0, 40.0) }
+                        ?.let { answeredInCycle++; temp = it; tempAt = now }
+                }
+            }
+            3 -> {
+                if (soh == null || now - sohAt > SLOW_MS) {
+                    tryOr("2161") { Bits.field(elm.request(LBC_TX, LBC_RX, "2161"), 72, 79, 0.5, 0.0) }
+                        ?.let { soh = it; sohAt = now; answeredInCycle++ }
+                } else if (cellDiff == null || now - cellAt > SLOW_MS) {
+                    tryOr("celdas") { cellSpread() }?.let { cellDiff = it; cellAt = now }
+                }
+            }
+            4 -> tryOr("223451") {
+                val b = elm.request(EVC_TX, EVC_RX, "223451")
+                if (b.size < 5) throw ElmException("respuesta corta")
+                Bits.get(b, (b.size - 2) * 8, b.size * 8 - 1).toInt()
+            }?.let { answeredInCycle++; if (it <= 1000) range = it }
+            5 -> tryOr("222005") { Bits.field(elm.request(EVC_TX, EVC_RX, "222005"), 24, 39, 0.01, 0.0) }
+                ?.takeIf { it in 5.0..20.0 }?.let { v12 = it }
+            6 -> tryOr("2121") { Bits.field(elm.request(HVAC_TX, HVAC_RX, "2121"), 26, 35, 0.1, 400.0) }
+                ?.takeIf { it in -40.0..80.0 }?.let { cabin = it }
+            7 -> {
+                // Enchufe y potencia de carga: solo con el carro detenido (o sin dato de velocidad).
+                val moving = (lastSpeed ?: 0.0) > 0.5 && now - lastSpeedAt < 5_000L
+                if (moving) {
+                    plugged = false; chg = null
+                } else {
+                    tryOr("654") {
+                        val f = elm.freeFrame("654", 700)
+                        plugged = Bits.get(f, 2, 2) == 1L
+                        val a = Bits.field(f, 52, 61, 0.1, 0.0)
+                        if (a in 1.0..60.0) avgCons = a
+                    }
+                    chg = if (plugged == true) tryOr("42E") { Bits.field(elm.freeFrame("42E", 500), 56, 63, 0.3, 0.0) } else null
+                }
+            }
+            8 -> {
+                // Luces: si la trama no existe en este carro, queda null y se dibujan encendidas.
+                quiet { lights = Bits.get(elm.freeFrame("5DE", 400), 5, 5) == 1L }
+            }
+            else -> {
+                // Tramas lentas, una por vuelta.
+                when (turn++ % 3) {
+                    0 -> tryOr("673") {
+                        val f = elm.freeFrame("673", 1200)
+                        val t = Tires(psi(f, 40), psi(f, 32), psi(f, 24), psi(f, 16))
+                        if (t.fl != null || t.fr != null || t.rl != null || t.rr != null) tires = t
+                    }
+                    1 -> tryOr("656") {
+                        val e = Bits.field(elm.freeFrame("656", 800), 48, 55, 1.0, 40.0)
+                        if (e in -40.0..70.0) ext = e
+                    }
+                    else -> tryOr("427") {
+                        val e = Bits.field(elm.freeFrame("427", 500), 49, 57, 0.1, 0.0)
+                        if (e in 0.5..60.0) avail = e
+                    }
+                }
+            }
+        }
+        stepIdx++
+        if (stepIdx < STEPS) return false
+        stepIdx = 0
+        val ok = answeredInCycle > 0
+        answeredInCycle = 0
+        if (!ok) throw ElmException("el carro no responde (¿apagado?)")
+        return true
+    }
+
+    /** Foto de los últimos valores leídos. */
+    fun snapshot(): ZoeData = ZoeData(
+        soc = usoc, realSoc = real, soh = soh, tempC = temp, currentA = current, rangeKm = range,
+        v12 = v12, cellDiffMv = cellDiff, plugged = plugged, chargingKw = chg,
+        availKwh = avail, avgConsumption = avgCons, tires = tires,
+        extTemp = ext, cabinTemp = cabin, climOn = null, lightsOn = lights,
+    )
 
     /** Lecturas rápidas para la app abierta: velocidad y potencia. */
     fun fast(): Pair<Double?, Double?> {
-        val sp = quiet { Bits.field(elm.freeFrame("5D7", 120), 0, 15, 0.01, 0.0) }?.takeIf { it < 250 }
+        // ×1,064: el velocímetro del tablero marca a propósito un poco más que la velocidad real (47 → 50).
+        val sp = quiet { Bits.field(elm.freeFrame("5D7", 120), 0, 15, 0.01, 0.0) }
+            ?.takeIf { it < 250 }?.let { it * DASH_FACTOR }
+        if (sp != null) { lastSpeed = sp; lastSpeedAt = System.currentTimeMillis() }
         val pw = quiet { Bits.field(elm.freeFrame("1FD", 120), 48, 55, 1.0, 80.0) }
         return sp to pw
     }
@@ -211,6 +240,8 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
         const val HVAC_TX = "744"
         const val HVAC_RX = "764"
         const val SLOW_MS = 10 * 60_000L
+        const val STEPS = 10
+        const val DASH_FACTOR = 1.064
     }
 }
 

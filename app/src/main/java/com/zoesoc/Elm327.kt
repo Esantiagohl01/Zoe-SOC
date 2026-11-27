@@ -33,7 +33,7 @@ class Elm327(private val t: Transport, private val log: (String) -> Unit) {
         if (mode != "diag") {
             cmd("ATCAF1")
             mode = "diag"
-            ecu = ""
+            if (ecu == tx) { cmd("ATCRA$rx"); return } // el encabezado sigue configurado
         }
         if (ecu == tx) return
         for (c in listOf("ATSH$tx", "ATCRA$rx", "ATFCSH$tx", "ATFCSD300000", "ATFCSM1")) {
@@ -66,7 +66,6 @@ class Elm327(private val t: Transport, private val log: (String) -> Unit) {
             if (!mode.startsWith("mon")) cmd("ATCAF0") // solo al venir de peticiones
             cmd("ATCRA$id")
             mode = "mon:$id"
-            ecu = ""
         }
         t.clearInput()
         t.write("ATMA\r")
