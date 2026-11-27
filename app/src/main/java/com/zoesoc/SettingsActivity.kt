@@ -112,11 +112,15 @@ class SettingsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        ZoeState.appVisible = true
+        ZoeState.touch()
         ZoeState.addListener(listener)
         refresh()
     }
 
     override fun onPause() {
+        ZoeState.appVisible = false
+        ZoeState.touch()
         ZoeState.removeListener(listener)
         super.onPause()
     }

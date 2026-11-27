@@ -37,21 +37,24 @@ object CarArt {
     }
 
     private val tireP = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val bodyP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xF2171B20.toInt() }
-    private val glassP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x24FFFFFF }
+    private val bodyP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFD9DEE3.toInt() }
+    private val glassP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF2C333B.toInt() }
     private val glassLine = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE; strokeWidth = 0.8f; color = 0x80C8D2DC.toInt()
+        style = Paint.Style.STROKE; strokeWidth = 0.8f; color = 0xFF2C333B.toInt()
     }
     private val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE; strokeWidth = 1.4f; color = 0xFFC8D2DC.toInt(); strokeJoin = Paint.Join.ROUND
+        style = Paint.Style.STROKE; strokeWidth = 1.4f; color = 0xFFFFFFFF.toInt(); strokeJoin = Paint.Join.ROUND
     }
-    private val packEmpty = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x1FFFFFFF }
+    private val packEmpty = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF9AA3AD.toInt() }
     private val packFill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val packLine = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE; strokeWidth = 1f; color = 0xFFE6ECF2.toInt()
+        style = Paint.Style.STROKE; strokeWidth = 1f; color = 0xFF3A4048.toInt()
     }
     private val boltP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Colors.AMBER }
     private val headP = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val edgeP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeWidth = 0.5f; color = 0xFF8A929B.toInt()
+    }
     private val headGlow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x59FFFFFF }
     private val tailP = Paint(Paint.ANTI_ALIAS_FLAG)
     private val tailGlow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x66FF3B3B }
@@ -92,6 +95,7 @@ object CarArt {
             if (bolt) {
                 boltP.alpha = packAlpha
                 c.drawPath(this.bolt, boltP)
+                c.drawPath(this.bolt, edgeP)
             }
         }
         c.drawPath(windshield, glassP); c.drawPath(windshield, glassLine)
@@ -101,9 +105,10 @@ object CarArt {
             c.drawOval(10f, 3f, 24f, 11f, headGlow); c.drawOval(36f, 3f, 50f, 11f, headGlow)
             c.drawOval(8f, 102f, 22f, 110f, tailGlow); c.drawOval(38f, 102f, 52f, 110f, tailGlow)
         }
-        headP.color = if (lights) 0xFFFFFFFF.toInt() else 0x73FFFFFF
+        headP.color = if (lights) 0xFFFFF6C8.toInt() else 0xFFB8BEC5.toInt()
         tailP.color = if (lights) 0xFFFF3B3B.toInt() else 0x8CFF3B3B.toInt()
         c.drawPath(heads, headP)
+        c.drawPath(heads, edgeP)
         c.drawPath(tails, tailP)
         c.restore()
     }

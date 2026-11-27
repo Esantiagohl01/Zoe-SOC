@@ -79,7 +79,9 @@ class ZoeService : Service() {
                 var lastSlow = 0L
                 while (running) {
                     // Lectura completa cada N segundos.
-                    if (cur == null || System.currentTimeMillis() - lastSlow >= prefs.intervalSec * 1000L) {
+                    // Con la app abierta la lectura completa va cada 30 s como mínimo, para no frenar la velocidad.
+                    val every = if (ZoeState.appVisible) maxOf(prefs.intervalSec, 30) else prefs.intervalSec
+                    if (cur == null || System.currentTimeMillis() - lastSlow >= every * 1000L) {
                         try {
                             val prev = cur
                             val d = reader.read().copy(
@@ -106,7 +108,7 @@ class ZoeService : Service() {
                         )
                         cur = u
                         ZoeState.publish(u, "OK")
-                        if (!pause(200)) break
+                        if (!pause(30)) break
                     } else {
                         if (!pause(1000)) break
                     }
@@ -139,7 +141,7 @@ class ZoeService : Service() {
 
     private fun onState() {
         val d = ZoeState.data
-        if (prefs.overlay) {
+        if (prefs.overlay && !ZoeState.appVisible) {
             overlay.show()
             overlay.update(d, ZoeState.status)
         } else {

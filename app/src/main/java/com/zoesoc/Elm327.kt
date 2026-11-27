@@ -63,7 +63,7 @@ class Elm327(private val t: Transport, private val log: (String) -> Unit) {
      */
     fun freeFrame(id: String, listenMs: Long = 250): ByteArray {
         if (mode != "mon:$id") {
-            cmd("ATCAF0")
+            if (!mode.startsWith("mon")) cmd("ATCAF0") // solo al venir de peticiones
             cmd("ATCRA$id")
             mode = "mon:$id"
             ecu = ""

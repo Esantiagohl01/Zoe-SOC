@@ -9,7 +9,7 @@ Solo lee datos. No escribe nada en los módulos del carro.
 - Se conecta solo al Vgate por BLE o Bluetooth clásico (prueba ambos).
 - Burbuja flotante (también encima de AutoKit/CarPlay): carro visto desde arriba con la batería que se llena según la carga, llantas de colores según la presión, faros y stops; SOC con decimal y temperatura de la batería. Cargando: rayo, kW y tiempo estimado al 80 %. Tocándola pasa a modo compacto (solo %), pegada a la derecha.
 - Colores: verde ≥ 30 %, amarillo < 30 %, rojo < 20 %.
-- App a pantalla completa, pensada en horizontal (R-Link + Carlinkit), con tres diseños que se cambian deslizando: Cabina (relojes de velocidad y potencia con el carro al centro), Digital (carro grande con presiones, velocidad grande y barra de potencia) y Clásico (relojes grandes y batería vertical). Una cuarta pantalla de Detalle tiene salud de la batería, celdas, 12 V, llantas, cargas y consumo. Cargando, cada diseño muestra los kW, el tiempo al 80 % / 100 % y lo cargado. El engranaje abre los ajustes.
+- App a pantalla completa, pensada en horizontal (R-Link + Carlinkit), con la pantalla Digital (carro grande con presiones, velocidad grande y barra de potencia de −30 a +70 kW). Deslizando se llega a Detalle, que tiene salud de la batería, celdas, 12 V, llantas, cargas y consumo. Cargando, la pantalla muestra los kW, el tiempo al 80 % / 100 % y lo cargado. El engranaje abre los ajustes.
 - Temperatura exterior e interior, A/C, y luces según el carro (si no se pueden leer, quedan encendidas; también se pueden dejar siempre encendidas en ajustes).
 - Arranca sola al encender la caja. Si el carro está apagado reintenta cada 20 s; si se pierde el Bluetooth reconecta cada 10 s.
 

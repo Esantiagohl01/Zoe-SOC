@@ -123,15 +123,17 @@ class BubbleView(ctx: Context) : View(ctx) {
     private fun dp(v: Float) = v * dm.density
     private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, dm)
 
-    private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE0111418.toInt() }
+    private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xA6111418.toInt() }
     private val num = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.DEFAULT_BOLD }
     private val small = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFB8C0C8.toInt() }
     private val boltP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Colors.AMBER }
+    private val therm = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = 0xFFD5DCE3.toInt() }
+    private val thermFill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val bolt = Path().apply {
         moveTo(7f, 0f); lineTo(0f, 13f); lineTo(5.5f, 13f); lineTo(4f, 22f); lineTo(12f, 8f); lineTo(6.5f, 8f); lineTo(9f, 0f); close()
     }
 
-    fun widthPx(): Int = dp(if (compact) 100f else 206f).roundToInt()
+    fun widthPx(): Int = dp(if (compact) 100f else 168f).roundToInt()
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val extra = if (status != "OK") 16f else 0f
@@ -164,43 +166,60 @@ class BubbleView(ctx: Context) : View(ctx) {
         } else 255
         val carH = dp(94f)
         CarArt.draw(
-            c, dp(12f), dp(5f), carH, s, col, CarArt.tireColors(d, refPsi),
+            c, dp(10f), dp(5f), carH, s, col, CarArt.tireColors(d, refPsi),
             packAlpha = alpha, lights = CarArt.lightsOn(d, lightsMode),
         )
 
+        val x0 = dp(68f)
+        small.textSize = sp(11f); small.color = 0xFFB8C0C8.toInt()
+        c.drawText("Batería", x0, dp(17f), small)
+
         // Porcentaje: entero grande, decimal y % pequeños.
-        val x0 = dp(74f)
-        val base = dp(42f)
+        val base = dp(46f)
         var x = x0
         if (s != null) {
             val (i, dec) = Fmt.socParts(s)
-            num.textSize = sp(31f); c.drawText(i, x, base, num); x += num.measureText(i)
-            num.textSize = sp(18f); c.drawText(",$dec", x, base, num); x += num.measureText(",$dec")
-            num.textSize = sp(20f); c.drawText("%", x, base, num); x += num.measureText("%")
+            num.textSize = sp(30f); c.drawText(i, x, base, num); x += num.measureText(i)
+            num.textSize = sp(17f); c.drawText(",$dec", x, base, num); x += num.measureText(",$dec")
+            num.textSize = sp(19f); c.drawText("%", x, base, num); x += num.measureText("%")
         } else {
-            num.textSize = sp(31f); c.drawText("--%", x, base, num); x += num.measureText("--%")
+            num.textSize = sp(30f); c.drawText("--%", x, base, num); x += num.measureText("--%")
         }
         if (charging) {
             c.save()
-            c.translate(x + dp(5f), base - dp(21f))
-            val k = dp(20f) / 22f
+            c.translate(x + dp(4f), base - dp(19f))
+            val k = dp(18f) / 22f
             c.scale(k, k)
             c.drawPath(bolt, boltP)
             c.restore()
         }
 
-        small.textSize = sp(13f)
         when {
-            status != "OK" -> c.drawText(status.take(18), x0, dp(66f), small)
-            charging && d != null -> {
-                val kw = d.chargingKw?.let { Fmt.f(it, 1) + " kW" } ?: "Cargando"
-                val tmp = d.tempC?.let { " · " + Fmt.f(it, 0) + " °C" } ?: ""
-                c.drawText(kw + tmp, x0, dp(66f), small)
-                val eta = d.minutesTo(80.0)?.let { "80 % en " + Fmt.dur(it) }
-                    ?: d.minutesTo(100.0)?.let { "100 % en " + Fmt.dur(it) }
-                if (eta != null) c.drawText(eta, x0, dp(86f), small)
+            status != "OK" -> {
+                small.textSize = sp(12f); small.color = 0xFFD5DCE3.toInt()
+                c.drawText(status.take(14), x0, dp(72f), small)
             }
-            else -> d?.tempC?.let { c.drawText("Batería " + Fmt.f(it, 0) + " °C", x0, dp(66f), small) }
+            charging && d != null -> {
+                num.textSize = sp(16f); num.color = Colors.AMBER
+                c.drawText(d.chargingKw?.let { Fmt.f(it, 1) + " kW" } ?: "Cargando", x0, dp(72f), num)
+                val eta = d.minutesTo(80.0)?.let { "80 % · " + Fmt.durShort(it) }
+                    ?: d.minutesTo(100.0)?.let { "100 % · " + Fmt.durShort(it) }
+                small.textSize = sp(12f); small.color = 0xFFD5DCE3.toInt()
+                if (eta != null) c.drawText(eta, x0, dp(92f), small)
+            }
+            else -> d?.tempC?.let {
+                // termómetro + temperatura grande
+                val tx = x0; val ty = dp(58f)
+                therm.strokeWidth = dp(1.3f)
+                c.drawRoundRect(tx + dp(3f), ty, tx + dp(6.5f), ty + dp(11f), dp(1.7f), dp(1.7f), therm)
+                val tc = Colors.batTemp(it)
+                therm.color = tc
+                thermFill.color = tc
+                c.drawCircle(tx + dp(4.75f), ty + dp(13.5f), dp(3.2f), thermFill)
+                c.drawRect(tx + dp(4.25f), ty + dp(4f), tx + dp(5.25f), ty + dp(12f), thermFill)
+                num.textSize = sp(17f); num.color = tc
+                c.drawText(Fmt.f(it, 0) + " °C", tx + dp(13f), dp(74f), num)
+            }
         }
         if (charging) postInvalidateDelayed(60)
     }

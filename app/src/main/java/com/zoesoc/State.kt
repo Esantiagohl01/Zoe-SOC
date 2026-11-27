@@ -95,10 +95,10 @@ class Prefs(ctx: Context) {
     var lightsMode: Int
         get() = p.getInt("lightsMode", 0)
         set(v) = p.edit().putInt("lightsMode", v).apply()
-    /** Pantalla de la app: 0 Cabina, 1 Digital, 2 Clásico, 3 Detalle. */
+    /** Pantalla de la app: 0 Digital, 1 Detalle. */
     var page: Int
-        get() = p.getInt("page", 1)
-        set(v) = p.edit().putInt("page", v).apply()
+        get() = p.getInt("page2", 0)
+        set(v) = p.edit().putInt("page2", v).apply()
 
     // Sesión de carga en curso.
     var chgStartTime: Long

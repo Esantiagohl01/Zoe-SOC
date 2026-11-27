@@ -49,12 +49,14 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         ZoeState.appVisible = true
+        ZoeState.touch() // oculta la burbuja
         ZoeState.addListener(listener)
         dash.update(ZoeState.data, ZoeState.status)
     }
 
     override fun onPause() {
         ZoeState.appVisible = false
+        ZoeState.touch() // vuelve a mostrar la burbuja
         ZoeState.removeListener(listener)
         super.onPause()
     }

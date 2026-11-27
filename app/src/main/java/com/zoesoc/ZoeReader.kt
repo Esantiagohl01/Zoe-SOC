@@ -79,6 +79,11 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
     private var clim: Boolean? = null
     private var lights: Boolean? = null
     private var turn = 0
+    // Últimos valores buenos, para que no parpadeen si una lectura falla.
+    private var lastTemp: Double? = null
+    private var lastRange: Int? = null
+    private var lastV12: Double? = null
+    private var lastCabin: Double? = null
 
     private inline fun <T> tryOr(name: String, f: () -> T): T? = try {
         f()
@@ -103,8 +108,9 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
         }
         var real = tryOr("2103") { Bits.field(elm.request(LBC_TX, LBC_RX, "2103"), 192, 207, 0.01, 0.0) }
         if (real != null) answered++
-        val temp = tryOr("2104") { Bits.field(elm.request(LBC_TX, LBC_RX, "2104"), 600, 607, 1.0, 40.0) }
-        if (temp != null) answered++
+        val tempRead = tryOr("2104") { Bits.field(elm.request(LBC_TX, LBC_RX, "2104"), 600, 607, 1.0, 40.0) }
+        if (tempRead != null) { answered++; lastTemp = tempRead }
+        val temp = tempRead ?: lastTemp
         if (soh == null || now - sohAt > SLOW_MS) {
             tryOr("2161") { Bits.field(elm.request(LBC_TX, LBC_RX, "2161"), 72, 79, 0.5, 0.0) }?.let {
                 soh = it; sohAt = now; answered++
@@ -119,13 +125,16 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
             Bits.get(b, (b.size - 2) * 8, b.size * 8 - 1).toInt()
         }
         if (range != null) answered++
-        val v12 = tryOr("222005") { Bits.field(elm.request(EVC_TX, EVC_RX, "222005"), 24, 39, 0.01, 0.0) }
+        tryOr("222005") { Bits.field(elm.request(EVC_TX, EVC_RX, "222005"), 24, 39, 0.01, 0.0) }
+            ?.takeIf { it in 5.0..20.0 }?.let { lastV12 = it }
+        val v12 = lastV12
 
         if (answered == 0) throw ElmException("el carro no responde (¿apagado?)")
 
-        val cabin = tryOr("2121") {
+        tryOr("2121") {
             Bits.field(elm.request(HVAC_TX, HVAC_RX, "2121"), 26, 35, 0.1, 400.0)
-        }?.takeIf { it in -40.0..80.0 }
+        }?.takeIf { it in -40.0..80.0 }?.let { lastCabin = it }
+        val cabin = lastCabin
 
         // Tramas libres: si alguna no llega, se conserva el último valor.
         var plugged: Boolean? = null
@@ -160,10 +169,11 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
         if (usoc != null && (usoc!! < 0 || usoc!! > 100)) { log("USOC fuera de rango: $usoc"); usoc = null }
         if (real != null && (real < 0 || real > 100)) { log("SOC real fuera de rango: $real"); real = null }
         if (range != null && range > 1000) range = null
+        if (range != null) lastRange = range else range = lastRange
 
         return ZoeData(
             soc = usoc, realSoc = real, soh = soh, tempC = temp, currentA = current, rangeKm = range,
-            v12 = v12?.takeIf { it in 5.0..20.0 }, cellDiffMv = cellDiff, plugged = plugged, chargingKw = chg,
+            v12 = v12, cellDiffMv = cellDiff, plugged = plugged, chargingKw = chg,
             availKwh = avail, avgConsumption = avgCons, tires = tires,
             extTemp = ext, cabinTemp = cabin, climOn = clim, lightsOn = lights,
         )
@@ -171,8 +181,8 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
 
     /** Lecturas rápidas para la app abierta: velocidad y potencia. */
     fun fast(): Pair<Double?, Double?> {
-        val sp = quiet { Bits.field(elm.freeFrame("5D7", 250), 0, 15, 0.01, 0.0) }?.takeIf { it < 250 }
-        val pw = quiet { Bits.field(elm.freeFrame("1FD", 250), 48, 55, 1.0, 80.0) }
+        val sp = quiet { Bits.field(elm.freeFrame("5D7", 120), 0, 15, 0.01, 0.0) }?.takeIf { it < 250 }
+        val pw = quiet { Bits.field(elm.freeFrame("1FD", 120), 48, 55, 1.0, 80.0) }
         return sp to pw
     }
 
@@ -218,6 +228,17 @@ object Colors {
         else -> GREEN
     }
 
+    val BLUE = 0xFF64B5F6.toInt()
+
+    /** Temperatura de la batería: azul < 10 °C, verde 10–29, amarillo 30–39, rojo ≥ 40. */
+    fun batTemp(t: Double?): Int = when {
+        t == null -> 0xFFE9EEF3.toInt()
+        t < 10 -> BLUE
+        t < 30 -> GREEN
+        t < 40 -> AMBER
+        else -> RED
+    }
+
     /** Verde hasta 3 PSI por debajo de la recomendada, amarillo hasta 6, rojo más abajo. */
     fun tire(psi: Double?, ref: Int): Int = when {
         psi == null -> GRAY
@@ -243,6 +264,9 @@ object Fmt {
     fun socDec(d: ZoeData?): String = d?.displaySoc?.let { f(it, 1) + " %" } ?: "-- %"
 
     fun temp(v: Double?): String = v?.let { f(it, 0) + " °C" } ?: "--"
+
+    /** Versión corta para la burbuja: "1 h 05" o "45 min". */
+    fun durShort(min: Int): String = if (min >= 60) "${min / 60} h ${String.format(ES, "%02d", min % 60)}" else "$min min"
 
     fun dur(min: Int): String = if (min >= 60) "${min / 60} h ${String.format(ES, "%02d", min % 60)} min" else "$min min"
 
