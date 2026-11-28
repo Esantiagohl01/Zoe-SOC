@@ -7,9 +7,9 @@ import android.media.ToneGenerator
  * Limitador de velocidad (solo avisa, no frena nada).
  * Modos: AUTO (50 en ciudad, 80 en carretera), 50 fijo, 80 fijo, apagado.
  * Automático: pasa a 80 si va a más de 65 km/h durante 20 s; vuelve a 50 si va a menos de 40 durante 2 min.
- * Aviso: un solo "tic tic" al pasar el límite por 2 km/h durante 2 s; se rearma al bajar 2 km/h del límite.
+ * Aviso: un solo "tiiin" (sonido de notificación) al pasar el límite por 2 km/h durante 2 s; se rearma al bajar 2 km/h del límite.
  */
-class SpeedLimiter(private val prefs: Prefs) {
+class SpeedLimiter(private val ctx: android.content.Context, private val prefs: Prefs) {
     companion object {
         const val AUTO = 0
         const val FIX50 = 1
@@ -66,10 +66,24 @@ class SpeedLimiter(private val prefs: Prefs) {
         }
     }
 
+    private var ding: android.media.Ringtone? = null
+
+    /**
+     * Un solo "tiiin" de ~1 s, como el de un mensaje: usa el sonido de notificación de la caja.
+     * Si la caja no tiene uno, hace un tono suave de 1 s.
+     */
     private fun tic() {
         try {
-            if (tone == null) tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 60)
-            tone?.startTone(ToneGenerator.TONE_PROP_BEEP2, 180)
+            if (ding == null) {
+                val uri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
+                ding = uri?.let { android.media.RingtoneManager.getRingtone(ctx, it) }
+            }
+            val r = ding
+            if (r != null) { r.play(); return }
+        } catch (e: Exception) { }
+        try {
+            if (tone == null) tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 90)
+            tone?.startTone(ToneGenerator.TONE_PROP_PROMPT, 1000)
         } catch (e: Exception) { }
     }
 }

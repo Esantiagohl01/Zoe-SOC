@@ -25,6 +25,8 @@ class ZoeService : Service() {
     override fun onCreate() {
         super.onCreate()
         prefs = Prefs(this)
+        lastNight = NightMode.isNight(this)
+        ZoeState.log("Modo noche: " + NightMode.describe(this))
         overlay = Overlay(this)
         createChannel()
         try {
@@ -47,6 +49,15 @@ class ZoeService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+
+    private var lastNight: Boolean? = null
+
+    /** Registra cada cambio de modo noche (lo puede mandar el R-Link por Android Auto). */
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val n = NightMode.isNight(this)
+        if (n != lastNight) { lastNight = n; ZoeState.log("Modo noche: " + NightMode.describe(this)) }
+    }
 
     override fun onDestroy() {
         running = false
@@ -101,6 +112,7 @@ class ZoeService : Service() {
                                 val (sp, pw) = reader.fast()
                                 if (sp != null || pw != null) {
                                     speed = sp ?: speed; power = pw ?: power; fastTime = System.currentTimeMillis()
+                                    pw?.let { PowerLog.add(it) }
                                 }
                             } else {
                                 speed = 0.0; power = null

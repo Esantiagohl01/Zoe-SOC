@@ -31,7 +31,7 @@ class DashView(ctx: Context) : View(ctx) {
     private var data: ZoeData? = null
     private var status = ""
 
-    private val limiter = SpeedLimiter(prefs)
+    private val limiter = SpeedLimiter(ctx, prefs)
 
     fun update(d: ZoeData?, st: String) {
         data = d
@@ -141,11 +141,15 @@ class DashView(ctx: Context) : View(ctx) {
         c.translate(ox, oy)
         c.scale(sc, sc)
         val d = data
-        if (page == 0) drawDigital(c, d) else drawDetail(c, d)
-        drawHeader(c, d)
-        drawDots(c)
-        drawHome(c)
-        drawAutoKit(c)
+        if (graphBig && page == 1) {
+            drawPowerGraph(c, big = true)
+        } else {
+            if (page == 0) drawDigital(c, d) else drawDetail(c, d)
+            drawHeader(c, d)
+            drawDots(c)
+            drawHome(c)
+            drawAutoKit(c)
+        }
         c.restore()
         // Un solo temporizador (no se acumulan): animación de carga o segundero del reloj.
         // Un solo temporizador: animación de carga, o cambio de minuto del reloj.
@@ -335,63 +339,128 @@ class DashView(ctx: Context) : View(ctx) {
         return instBuf.sumOf { it.second } / instBuf.size
     }
 
-    /** Página 2: salud de la batería, llantas y cargas. */
+    /** Página 2: batería, llantas, cargas y gráfica de potencia de los últimos 15 min. */
     private fun drawDetail(c: Canvas, d: ZoeData?) {
-        // Batería
+        val lc = 0xFFC8D0D8.toInt()
+        // Batería (tabla)
         fill.color = panelC
-        c.drawRoundRect(20f, 70f, 360f, 512f, 20f, 20f, fill)
-        txt(c, "Salud de la batería", 40f, 110f, 26f, dimC)
-        txt(c, d?.soh?.let { Fmt.f(it, 1) + " %" } ?: "--", 40f, 172f, 58f, Colors.GREEN, true)
-        val pts = prefs.sohHistory.map { it.second }
-        if (pts.size >= 2) {
-            val lo = (pts.minOrNull() ?: 0.0) - 0.5; val hi = (pts.maxOrNull() ?: 100.0) + 0.5
-            val p = Path()
-            pts.forEachIndexed { i, v ->
-                val x = 40f + 300f * i / (pts.size - 1)
-                val y = 200f + 80f * (1 - ((v - lo) / (hi - lo)).toFloat())
-                if (i == 0) p.moveTo(x, y) else p.lineTo(x, y)
-            }
-            line.strokeWidth = 4f; line.color = Colors.GREEN
-            c.drawPath(p, line)
-        } else {
-            txt(c, "Se llena con un punto por día", 40f, 245f, 24f, dimC)
+        c.drawRoundRect(20f, 70f, 360f, 290f, 20f, 20f, fill)
+        txt(c, "Batería", 40f, 104f, 22f, dimC)
+        fun row(x0: Float, x1: Float, y: Float, l: String, v: String, col: Int = textC) {
+            txt(c, l, x0, y, 24f, dimC); txt(c, v, x1, y, 24f, col, true, Paint.Align.RIGHT)
         }
-        fun row(y: Float, l: String, v: String, col: Int = textC) {
-            txt(c, l, 40f, y, 28f, dimC); txt(c, v, 340f, y, 28f, col, true, Paint.Align.RIGHT)
-        }
-        row(330f, "Dif. celdas", d?.cellDiffMv?.let { "$it mV" } ?: "--", if ((d?.cellDiffMv ?: 0) > 50) Colors.AMBER else textC)
-        row(375f, "Batería 12 V", d?.v12?.let { Fmt.f(it, 1) + " V" } ?: "--", if ((d?.v12 ?: 13.0) < 12.0) Colors.AMBER else textC)
-        row(420f, "Temp. batería", Fmt.temp(d?.tempC), Colors.batTemp(d?.tempC))
-        row(465f, "SOC real", d?.realSoc?.let { Fmt.f(it, 1) + " %" } ?: "--")
+        row(40f, 340f, 142f, "SOH", d?.soh?.let { Fmt.f(it, 1) + " %" } ?: "--", Colors.GREEN)
+        row(40f, 340f, 178f, "Dif. celdas", d?.cellDiffMv?.let { "$it mV" } ?: "--", if ((d?.cellDiffMv ?: 0) > 50) Colors.AMBER else textC)
+        row(40f, 340f, 214f, "Batería 12 V", d?.v12?.let { Fmt.f(it, 1) + " V" } ?: "--", if ((d?.v12 ?: 13.0) < 12.0) Colors.AMBER else textC)
+        row(40f, 340f, 250f, "Temp. batería", Fmt.temp(d?.tempC), Colors.batTemp(d?.tempC))
+        row(40f, 340f, 280f, "SOC real", d?.realSoc?.let { Fmt.f(it, 1) + " %" } ?: "--")
 
         // Llantas
-        txt(c, "Llantas (PSI)", 500f, 100f, 26f, dimC, align = Paint.Align.CENTER)
-        val h = 360f; val w = h * CarArt.W / CarArt.H
-        val top = 180f
+        txt(c, "Llantas (PSI)", 500f, 92f, 22f, dimC, align = Paint.Align.CENTER)
+        val h = 180f; val w = h * CarArt.W / CarArt.H
+        val top = 106f
         car(c, 500f, top, h, d, 255, showPack = false)
-        tirePsi(c, d, 500f - w / 2 + w * 0.5f / CarArt.W - 10f, 500f - w / 2 + w * 59.5f / CarArt.W + 10f, top, h, 34f)
+        tirePsi(c, d, 500f - w / 2 + w * 0.5f / CarArt.W - 10f, 500f - w / 2 + w * 59.5f / CarArt.W + 10f, top, h, 28f)
 
         // Cargas
         fill.color = panelC
-        c.drawRoundRect(640f, 70f, 980f, 512f, 20f, 20f, fill)
-        txt(c, "Cargas", 660f, 110f, 26f, dimC)
+        c.drawRoundRect(640f, 70f, 980f, 290f, 20f, 20f, fill)
+        txt(c, "Cargas", 660f, 104f, 22f, dimC)
         val state = when {
             d == null || d.plugged == null -> "--"
             d.charging -> "Cargando " + (d.chargingKw?.let { Fmt.f(it, 1) + " kW" } ?: "")
             d.plugged == true -> "Conectado"
             else -> "Desconectado"
         }
-        txt(c, state, 660f, 158f, 32f, if (d?.charging == true) Colors.AMBER else textC, true)
-        val hist = prefs.chargeHistory
-        if (hist.isEmpty()) txt(c, "Aún no hay cargas", 660f, 210f, 26f, dimC)
-        hist.take(4).forEachIndexed { i, hTxt ->
-            val parts = hTxt.split(" · ")
-            txt(c, parts.getOrElse(0) { "" }, 660f, 210f + i * 42f, 28f, dimC)
-            txt(c, parts.getOrElse(1) { "" }, 960f, 210f + i * 42f, 28f, textC, true, Paint.Align.RIGHT)
+        txt(c, state, 960f, 106f, 26f, if (d?.charging == true) Colors.AMBER else textC, true, Paint.Align.RIGHT)
+        val day = prefs.lastChgDay
+        row(660f, 960f, 170f, "Última · " + (day ?: "--"), if (day != null) "+" + Fmt.f(prefs.lastChgKwh.toDouble(), 1) + " kWh" else "--")
+        drawPostToCar(c, 660f, 224f)
+        val km = prefs.sinceKm.toDouble()
+        txt(c, Fmt.f(km, 0) + " km", 960f, 224f, 24f, textC, true, Paint.Align.RIGHT)
+        val prom = if (km >= 1.0) Fmt.f(prefs.sinceKwh / km * 100, 1) + " kWh/100" else "--"
+        row(660f, 960f, 274f, "Prom.", prom)
+
+        drawPowerGraph(c)
+    }
+
+    /** Ícono "poste · · · · carrito": km desde la última carga. */
+    private fun drawPostToCar(c: Canvas, x: Float, base: Float) {
+        fill.color = dimC
+        c.drawRoundRect(x + 2, base - 26, x + 17, base + 2, 3f, 3f, fill)          // poste
+        fill.color = panelC
+        c.drawRoundRect(x + 5, base - 22, x + 14, base - 16, 1f, 1f, fill)        // pantallita
+        fill.color = dimC
+        c.drawRoundRect(x - 1, base + 1, x + 20, base + 5, 2f, 2f, fill)          // base
+        for (i in 0 until 4) c.drawCircle(x + 30 + i * 10f, base - 9, 2.5f, fill) // puntos
+        val p = Path()
+        val cx = x + 69
+        p.moveTo(cx, base - 3); p.lineTo(cx + 4, base - 13); p.quadTo(cx + 6, base - 17, cx + 10, base - 17)
+        p.lineTo(cx + 22, base - 17); p.quadTo(cx + 26, base - 17, cx + 28, base - 13); p.lineTo(cx + 32, base - 3)
+        p.quadTo(cx + 34, base - 3, cx + 34, base); p.lineTo(cx + 34, base + 3); p.lineTo(cx - 2, base + 3)
+        p.lineTo(cx - 2, base); p.quadTo(cx - 2, base - 3, cx, base - 3); p.close()
+        c.drawPath(p, fill)
+        c.drawCircle(cx + 6, base + 4, 3.5f, fill); c.drawCircle(cx + 26, base + 4, 3.5f, fill)
+    }
+
+    /** true = la gráfica de potencia ocupa toda la pantalla (se abre tocándola en la hoja 2). */
+    private var graphBig = false
+
+    /** Potencia de los últimos 15 min: verde hasta 30 kW, ámbar encima, azul regenerando. Escala +70 a −40. */
+    private fun drawPowerGraph(c: Canvas, big: Boolean = false) {
+        val gx0 = 40f
+        val gx1 = if (big) 920f else 930f
+        val yTop = if (big) 100f else 345f
+        val yBot = if (big) 500f else 500f
+        val lx = 960f
+        val ls = if (big) 20f else 16f
+        if (big) {
+            txt(c, "Potencia · últimos 15 min", 40f, 58f, 28f, dimC)
+            line.strokeWidth = 4f; line.color = dimC
+            c.drawLine(938f, 34f, 962f, 58f, line); c.drawLine(962f, 34f, 938f, 58f, line)
+        } else {
+            fill.color = panelC
+            c.drawRoundRect(20f, 302f, 980f, 512f, 20f, 20f, fill)
+            txt(c, "Potencia · últimos 15 min", 40f, 332f, 22f, dimC)
         }
-        txt(c, "Consumo promedio", 660f, 395f, 26f, dimC)
-        txt(c, d?.avgConsumption?.let { Fmt.f(it, 1) + " kWh/100" } ?: "--", 660f, 438f, 38f, textC, true)
-        txt(c, "Exterior " + Fmt.temp(d?.extTemp) + " · Interior " + Fmt.temp(d?.cabinTemp), 660f, 488f, 24f, dimC)
+        fun y(kw: Double) = (yTop + (70.0 - kw.coerceIn(-40.0, 70.0)) / 110.0 * (yBot - yTop)).toFloat()
+        val y0 = y(0.0); val y30 = y(30.0)
+        // guías
+        if (big) {
+            line.strokeWidth = 1.5f; line.color = 0xFF2A3038.toInt()
+            c.drawLine(gx0, y(70.0), gx1, y(70.0), line)
+            c.drawLine(gx0, y(-40.0), gx1, y(-40.0), line)
+            for (k in 1..2) { val tx = gx0 + (gx1 - gx0) * k / 3f; c.drawLine(tx, yTop, tx, yBot, line) }
+        }
+        line.strokeWidth = 1.5f; line.color = 0xFF3A4048.toInt()
+        var gx = gx0
+        while (gx < gx1) { c.drawLine(gx, y30, minOf(gx + 6f, gx1), y30, line); gx += 14f }
+        line.strokeWidth = 2f; line.color = 0xFF4A525C.toInt()
+        c.drawLine(gx0, y0, gx1, y0, line)
+        txt(c, "70", lx, y(70.0) + ls * 0.35f, ls, 0xFF5A636C.toInt(), align = Paint.Align.RIGHT)
+        txt(c, "30", lx, y30 + ls * 0.35f, ls, dimC, align = Paint.Align.RIGHT)
+        txt(c, "0", lx, y0 + ls * 0.35f, ls, dimC, align = Paint.Align.RIGHT)
+        txt(c, "−40", lx, y(-40.0) + ls * 0.35f, ls, 0xFF5A636C.toInt(), align = Paint.Align.RIGHT)
+        if (big) {
+            txt(c, "−15 min", gx0, 540f, 20f, dimC)
+            txt(c, "−10", gx0 + (gx1 - gx0) / 3f, 540f, 20f, dimC, align = Paint.Align.CENTER)
+            txt(c, "−5", gx0 + (gx1 - gx0) * 2 / 3f, 540f, 20f, dimC, align = Paint.Align.CENTER)
+            txt(c, "ahora", gx1, 540f, 20f, dimC, align = Paint.Align.RIGHT)
+            txt(c, "Toca para volver", 40f, 580f, 20f, 0xFF5A636C.toInt())
+        }
+
+        val v = PowerLog.series()
+        val n = v.size
+        val dx = (gx1 - gx0) / (n - 1)
+        line.strokeWidth = if (big) 6f else 4f
+        for (i in 1 until n) {
+            val a = v[i - 1] ?: continue
+            val b = v[i] ?: continue
+            val mid = (a + b) / 2
+            line.color = when { mid < 0 -> BLUE_REGEN; mid > 30 -> Colors.AMBER; else -> Colors.GREEN }
+            c.drawLine(gx0 + (i - 1) * dx, y(a), gx0 + i * dx, y(b), line)
+        }
+        if (v.all { it == null }) txt(c, "Se llena mientras manejas con el tablero abierto", (gx0 + gx1) / 2, y0 - 14f, 22f, dimC, align = Paint.Align.CENTER)
     }
 
     /** Bloque "Viaje": km grandes y, debajo, kWh y consumo del viaje (desde que se prendió el carro). */
@@ -459,7 +528,9 @@ class DashView(ctx: Context) : View(ctx) {
         override fun onSingleTapUp(e: MotionEvent): Boolean {
             val x = (e.x - ox) / sc
             val y = (e.y - oy) / sc
+            if (graphBig) { graphBig = false; invalidate(); return true } // cualquier toque cierra la gráfica grande
             when {
+                page == 1 && x in 20f..980f && y in 302f..512f && !(x < 120 && y > 500) -> { graphBig = true; invalidate() }
                 x > 900 && y < 90 -> onSettings?.invoke()
                 page == 0 && data?.charging != true && abs(x - SIGN_X) < 60 && abs(y - SIGN_Y) < 60 -> { limiter.cycle(); invalidate() }
                 x < 120 && y > 500 -> onHome?.invoke()
@@ -471,6 +542,7 @@ class DashView(ctx: Context) : View(ctx) {
     })
 
     private fun go(delta: Int) {
+        graphBig = false
         page = (page + delta + PAGES) % PAGES
         prefs.page = page
         invalidate()
@@ -478,6 +550,7 @@ class DashView(ctx: Context) : View(ctx) {
 
     companion object {
         const val PAGES = 2
+        const val BLUE_REGEN = 0xFF4A90D9.toInt()
         /** Intervalo de las animaciones (latido de carga, flujo, señal parpadeando). */
         const val ANIM_MS = 110L
         /** Posición del teléfono: a la derecha del carro, a la misma altura que la casita. */

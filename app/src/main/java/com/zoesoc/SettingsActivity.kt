@@ -54,6 +54,7 @@ class SettingsActivity : Activity() {
     private lateinit var prefs: Prefs
     private lateinit var tvDevice: TextView
     private lateinit var tvStatus: TextView
+    private lateinit var tvNight: TextView
     private lateinit var tvLog: TextView
     private val handler = Handler(Looper.getMainLooper())
     private val listener: () -> Unit = { refresh() }
@@ -80,6 +81,8 @@ class SettingsActivity : Activity() {
         add(text(18f, textMain).apply { text = "Ajustes"; typeface = Typeface.DEFAULT_BOLD }, 10)
         tvStatus = text(14f, textDim)
         add(tvStatus)
+        tvNight = text(14f, textDim)
+        add(tvNight)
         tvDevice = text(14f, textMain)
         add(tvDevice)
         add(Button(this).apply { text = "Elegir scanner"; setOnClickListener { pickDevice() } })
@@ -156,6 +159,7 @@ class SettingsActivity : Activity() {
 
     private fun refresh() {
         tvStatus.text = "Estado: " + (if (ZoeService.running) ZoeState.status else "detenido")
+        tvNight.text = "Modo noche del R-Link: " + NightMode.describe(this)
         tvDevice.text = "Scanner: " + (prefs.deviceName ?: "no elegido")
         tvLog.text = ZoeState.logText()
     }

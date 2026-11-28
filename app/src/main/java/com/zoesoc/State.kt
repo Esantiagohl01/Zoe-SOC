@@ -123,6 +123,20 @@ class Prefs(ctx: Context) {
         set(v) = p.edit().putLong("chgLastTs", v).apply()
 
     /** Últimas cargas, la más reciente primero: "dd/MM · 22 → 80 %". */
+    /** Última carga terminada: día ("26 nov") y kWh cargados. */
+    var lastChgDay: String?
+        get() = p.getString("lastChgDay", null)
+        set(v) = p.edit().putString("lastChgDay", v).apply()
+    var lastChgKwh: Float
+        get() = p.getFloat("lastChgKwh", 0f)
+        set(v) = p.edit().putFloat("lastChgKwh", v).apply()
+    /** Km y kWh recorridos desde la última carga (se reinician al terminar de cargar). */
+    var sinceKm: Float
+        get() = p.getFloat("sinceKm", 0f)
+        set(v) = p.edit().putFloat("sinceKm", v).apply()
+    var sinceKwh: Float
+        get() = p.getFloat("sinceKwh", 0f)
+        set(v) = p.edit().putFloat("sinceKwh", v).apply()
     var chargeHistory: List<String>
         get() = (p.getString("chgHist", "") ?: "").split('|').filter { it.isNotBlank() }
         set(v) = p.edit().putString("chgHist", v.joinToString("|")).apply()
@@ -154,10 +168,26 @@ object History {
             if (s - start >= 1) {
                 val day = SimpleDateFormat("dd/MM", Locale.US).format(Date())
                 p.chargeHistory = (listOf("$day · ${start.toInt()} → ${s.toInt()} %") + p.chargeHistory).take(5)
+                val cal = java.util.Calendar.getInstance()
+                p.lastChgDay = "${cal.get(java.util.Calendar.DAY_OF_MONTH)} ${MONTHS[cal.get(java.util.Calendar.MONTH)]}"
+                p.lastChgKwh = p.chgKwh
+                p.sinceKm = 0f; p.sinceKwh = 0f
             }
             p.chgStartTime = 0L
         }
+        // Km y kWh desde la última carga, sumando lo que avanzan los contadores de viaje.
+        if (!d.charging) {
+            val km = d.tripKm; val kwh = d.tripKwh
+            val lk = lastKm; val le = lastKwh
+            if (km != null && lk != null && km >= lk && km - lk < 2.0) p.sinceKm = p.sinceKm + (km - lk).toFloat()
+            if (kwh != null && le != null && kwh >= le && kwh - le < 1.0) p.sinceKwh = p.sinceKwh + (kwh - le).toFloat()
+            lastKm = km; lastKwh = kwh
+        }
     }
+
+    private var lastKm: Double? = null
+    private var lastKwh: Double? = null
+    private val MONTHS = arrayOf("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
 
     fun startHour(p: Prefs): String? =
         if (p.chgStartTime == 0L) null else SimpleDateFormat("HH:mm", Locale.US).format(Date(p.chgStartTime))
@@ -196,5 +226,52 @@ object ZoeTrip {
             accKwh + raw - (baseKwh ?: raw)
         }
         return d.copy(tripKm = km, tripKwh = kwh)
+    }
+}
+
+/**
+ * Potencia de los últimos 15 minutos para la gráfica de la hoja 2.
+ * Se guarda en cajitas de 2 s (promedio), 450 en total; las vacías quedan como hueco.
+ */
+object PowerLog {
+    const val BIN_MS = 2_000L
+    const val BINS = 450
+    private val sum = DoubleArray(BINS)
+    private val cnt = IntArray(BINS)
+    private val binId = LongArray(BINS) { -1L }
+
+    @Synchronized fun add(kw: Double, now: Long = System.currentTimeMillis()) {
+        val id = now / BIN_MS
+        val i = (id % BINS).toInt()
+        if (binId[i] != id) { binId[i] = id; sum[i] = 0.0; cnt[i] = 0 }
+        sum[i] += kw; cnt[i]++
+    }
+
+    /** Valores de la más vieja a la más nueva (null = sin dato). */
+    @Synchronized fun series(now: Long = System.currentTimeMillis()): Array<Double?> {
+        val last = now / BIN_MS
+        return Array(BINS) { k ->
+            val id = last - (BINS - 1 - k)
+            val i = (id % BINS).toInt()
+            if (binId[i] == id && cnt[i] > 0) sum[i] / cnt[i] else null
+        }
+    }
+}
+
+/** Modo noche que la Tbox recibe del R-Link (prueba: si cambia solo, el fondo podría seguirlo). */
+object NightMode {
+    fun isNight(ctx: Context): Boolean =
+        (ctx.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+
+    fun describe(ctx: Context): String {
+        val um = ctx.getSystemService(Context.UI_MODE_SERVICE) as? android.app.UiModeManager
+        val sys = when (um?.nightMode) {
+            android.app.UiModeManager.MODE_NIGHT_YES -> "sí"
+            android.app.UiModeManager.MODE_NIGHT_NO -> "no"
+            android.app.UiModeManager.MODE_NIGHT_AUTO -> "auto"
+            else -> "?"
+        }
+        return (if (isNight(ctx)) "sí" else "no") + " (sistema: $sys)"
     }
 }
