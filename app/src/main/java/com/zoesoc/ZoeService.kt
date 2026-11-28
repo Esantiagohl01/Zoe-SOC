@@ -95,6 +95,7 @@ class ZoeService : Service() {
                 var resting = false
                 var lowCount = 0
                 var restStart = 0L
+                var lastPowerAt = 0L
                 fun withLive(d: ZoeData) = ZoeTrip.apply(
                     d.copy(speedKmh = speed, powerKw = power, fastTime = fastTime, rawTires = d.tires, tires = TireMap.apply(d.tires, prefs.tireMap)),
                 )
@@ -154,6 +155,12 @@ class ZoeService : Service() {
                                 } else {
                                     ZoeState.publish(d, "OK")
                                 }
+                            }
+                            // Gráfica de potencia también con la burbuja: solo la potencia, cada 2 s (no se dibuja nada).
+                            if (!resting && !reader.snapshot().charging &&
+                                System.currentTimeMillis() - lastPowerAt >= PowerLog.BIN_MS) {
+                                lastPowerAt = System.currentTimeMillis()
+                                reader.powerOnly()?.let { PowerLog.add(it) }
                             }
                             if (!pause(500)) break
                         }

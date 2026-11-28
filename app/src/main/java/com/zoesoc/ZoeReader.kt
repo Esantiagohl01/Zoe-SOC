@@ -263,6 +263,9 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
         return sp to pw
     }
 
+    /** Solo la potencia (para la gráfica con la burbuja): una trama corta. */
+    fun powerOnly(): Double? = quiet { Bits.field(elm.freeFrame("1FD", 120), 48, 55, 1.0, 80.0) }
+
     /** kW entrando a la batería, desde voltaje y corriente; 0 si no está transfiriendo. */
     private fun chargePower(): Double? {
         val v = packV ?: return null

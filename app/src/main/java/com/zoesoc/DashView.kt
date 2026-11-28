@@ -415,13 +415,13 @@ class DashView(ctx: Context) : View(ctx) {
         val lx = 960f
         val ls = if (big) 20f else 16f
         if (big) {
-            txt(c, "Potencia · últimos 15 min", 40f, 58f, 28f, dimC)
+            txt(c, "Potencia · últimos 10 min", 40f, 58f, 28f, dimC)
             line.strokeWidth = 4f; line.color = dimC
             c.drawLine(938f, 34f, 962f, 58f, line); c.drawLine(962f, 34f, 938f, 58f, line)
         } else {
             fill.color = panelC
             c.drawRoundRect(20f, 302f, 980f, 512f, 20f, 20f, fill)
-            txt(c, "Potencia · últimos 15 min", 40f, 332f, 22f, dimC)
+            txt(c, "Potencia · últimos 10 min", 40f, 332f, 22f, dimC)
         }
         // Escala: normalmente +15 a −15; si algo se sale, se abre hasta cubrirlo (máx. +70 / −40), en pasos de 5.
         val v = PowerLog.series()
@@ -431,23 +431,23 @@ class DashView(ctx: Context) : View(ctx) {
         val bot = minOf(-15.0, Math.floor(lo / 5) * 5).coerceAtLeast(-40.0)
         fun y(kw: Double) = (yTop + (top - kw.coerceIn(bot, top)) / (top - bot) * (yBot - yTop)).toFloat()
         val y0 = y(0.0)
-        val show30 = top >= 35.0
-        val y30 = y(30.0)
+        val show15 = top > 15.0
+        val y15 = y(15.0)
         // guías
         if (big) {
             line.strokeWidth = 1.5f; line.color = 0x80FFFFFF.toInt()
             c.drawLine(gx0, y(top), gx1, y(top), line)
             c.drawLine(gx0, y(bot), gx1, y(bot), line)
-            for (k in 1..2) { val tx = gx0 + (gx1 - gx0) * k / 3f; c.drawLine(tx, yTop, tx, yBot, line) }
+            val tx = (gx0 + gx1) / 2; c.drawLine(tx, yTop, tx, yBot, line)
         }
         // eje vertical a la izquierda
         line.strokeWidth = 2.5f; line.color = 0xFFFFFFFF.toInt()
         c.drawLine(gx0, yTop, gx0, yBot, line)
-        if (show30) {
+        if (show15) {
             line.strokeWidth = 2f; line.color = 0xB3FFFFFF.toInt()
             var gx = gx0
-            while (gx < gx1) { c.drawLine(gx, y30, minOf(gx + 6f, gx1), y30, line); gx += 14f }
-            txt(c, "30", lx, y30 + ls * 0.35f, ls, textC, align = Paint.Align.RIGHT)
+            while (gx < gx1) { c.drawLine(gx, y15, minOf(gx + 6f, gx1), y15, line); gx += 14f }
+            txt(c, "15", lx, y15 + ls * 0.35f, ls, textC, align = Paint.Align.RIGHT)
         }
         line.strokeWidth = 2.5f; line.color = 0xFFFFFFFF.toInt()
         c.drawLine(gx0, y0, gx1, y0, line)
@@ -456,24 +456,23 @@ class DashView(ctx: Context) : View(ctx) {
         txt(c, "0", lx, y0 + ls * 0.35f, ls, textC, align = Paint.Align.RIGHT)
         txt(c, kwLabel(bot), lx, y(bot) + ls * 0.35f, ls, textC, align = Paint.Align.RIGHT)
         if (big) {
-            txt(c, "−15 min", gx0, 540f, 20f, textC)
-            txt(c, "−10", gx0 + (gx1 - gx0) / 3f, 540f, 20f, textC, align = Paint.Align.CENTER)
-            txt(c, "−5", gx0 + (gx1 - gx0) * 2 / 3f, 540f, 20f, textC, align = Paint.Align.CENTER)
+            txt(c, "−10 min", gx0, 540f, 20f, textC)
+            txt(c, "−5", (gx0 + gx1) / 2, 540f, 20f, textC, align = Paint.Align.CENTER)
             txt(c, "ahora", gx1, 540f, 20f, textC, align = Paint.Align.RIGHT)
             txt(c, "Toca para volver", 40f, 580f, 20f, 0xFF5A636C.toInt())
         }
 
         val n = v.size
         val dx = (gx1 - gx0) / (n - 1)
-        line.strokeWidth = if (big) 6f else 4f
+        line.strokeWidth = if (big) 3f else 2.5f
         for (i in 1 until n) {
             val a = v[i - 1] ?: continue
             val b = v[i] ?: continue
             val mid = (a + b) / 2
-            line.color = when { mid < 0 -> BLUE_REGEN; mid > 30 -> Colors.AMBER; else -> Colors.GREEN }
+            line.color = when { mid < 0 -> BLUE_REGEN; mid <= 15 -> Colors.GREEN; mid <= 32 -> ORANGE_PWR; else -> RED_PWR }
             c.drawLine(gx0 + (i - 1) * dx, y(a), gx0 + i * dx, y(b), line)
         }
-        if (v.all { it == null }) txt(c, "Se llena mientras manejas con el tablero abierto", (gx0 + gx1) / 2, y0 - 14f, 22f, dimC, align = Paint.Align.CENTER)
+        if (v.all { it == null }) txt(c, "Se llena mientras manejas", (gx0 + gx1) / 2, y0 - 14f, 22f, dimC, align = Paint.Align.CENTER)
     }
 
     /** Bloque "Viaje": km grandes y, debajo, kWh y consumo del viaje (desde que se prendió el carro). */
@@ -564,6 +563,8 @@ class DashView(ctx: Context) : View(ctx) {
     companion object {
         const val PAGES = 2
         const val BLUE_REGEN = 0xFF4A90D9.toInt()
+        const val ORANGE_PWR = 0xFFF08A24.toInt()
+        const val RED_PWR = 0xFFE04848.toInt()
         /** Intervalo de las animaciones (latido de carga, flujo, señal parpadeando). */
         const val ANIM_MS = 110L
         /** Posición del teléfono: a la derecha del carro, a la misma altura que la casita. */

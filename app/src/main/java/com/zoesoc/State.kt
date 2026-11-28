@@ -230,12 +230,12 @@ object ZoeTrip {
 }
 
 /**
- * Potencia de los últimos 15 minutos para la gráfica de la hoja 2.
- * Se guarda en cajitas de 2 s (promedio), 450 en total; las vacías quedan como hueco.
+ * Potencia de los últimos 10 minutos para la gráfica de la hoja 2.
+ * Se guarda en cajitas de 2 s (promedio), 300 en total; las vacías quedan como hueco.
  */
 object PowerLog {
     const val BIN_MS = 2_000L
-    const val BINS = 450
+    const val BINS = 300
     private val sum = DoubleArray(BINS)
     private val cnt = IntArray(BINS)
     private val binId = LongArray(BINS) { -1L }
