@@ -94,10 +94,9 @@ class MaintenanceActivity : Activity() {
 
     /** Aplica el mapa nuevo de una vez a los datos publicados (burbuja, tablero, detalle). */
     private fun changed() {
-        ZoeState.data?.let { d ->
-            ZoeState.data = d.copy(tires = TireMap.apply(d.rawTires ?: d.tires, prefs.tireMap))
-        }
-        ZoeState.touch()
+        val d = ZoeState.data
+        if (d?.rawTires != null) ZoeState.publish(d.copy(tires = TireMap.apply(d.rawTires, prefs.tireMap)), ZoeState.status)
+        else ZoeState.touch()
         map.invalidate()
     }
 
