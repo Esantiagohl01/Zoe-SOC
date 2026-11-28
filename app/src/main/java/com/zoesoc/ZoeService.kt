@@ -137,11 +137,16 @@ class ZoeService : Service() {
                                     continue
                                 }
                             }
-                            // Solo la burbuja: lectura completa cada 10 s.
-                            // Cargando, la batería cambia lento: cada 20 s basta.
-                            val every = if (reader.snapshot().charging) 2 * FULL_MS else FULL_MS
+                            // Solo la burbuja grande: lectura completa cada 10 s (cargando, cada 20 s).
+                            // Burbuja compacta = modo ahorro: solo SOC, 12 V y enchufe, cada 30 s.
+                            val light = prefs.compact
+                            val every = when {
+                                light -> 3 * FULL_MS
+                                reader.snapshot().charging -> 2 * FULL_MS
+                                else -> FULL_MS
+                            }
                             if (System.currentTimeMillis() - lastFull >= every) {
-                                val d = withLive(reader.read())
+                                val d = withLive(if (light) reader.light() else reader.read())
                                 lastFull = System.currentTimeMillis()
                                 History.onData(this, d)
                                 // Carro apagado = sin carga y 12 V por debajo de 13 V (el DC-DC ya se apagó).
@@ -156,8 +161,9 @@ class ZoeService : Service() {
                                     ZoeState.publish(d, "OK")
                                 }
                             }
-                            // Gráfica de potencia también con la burbuja: solo la potencia, cada 2 s (no se dibuja nada).
-                            if (!resting && !reader.snapshot().charging &&
+                            // Gráfica de potencia también con la burbuja grande: solo la potencia, cada 2 s (no se dibuja nada).
+                            // Con la burbuja compacta no: modo ahorro, como antes.
+                            if (!resting && !prefs.compact && !reader.snapshot().charging &&
                                 System.currentTimeMillis() - lastPowerAt >= PowerLog.BIN_MS) {
                                 lastPowerAt = System.currentTimeMillis()
                                 reader.powerOnly()?.let { PowerLog.add(it) }

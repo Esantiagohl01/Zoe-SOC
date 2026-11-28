@@ -228,6 +228,20 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
         return true
     }
 
+    /**
+     * Lectura mínima para la burbuja compacta (modo ahorro): solo SOC, 12 V (para saber si el carro se apagó)
+     * y enchufe/carga. Tres preguntas en vez de diez.
+     */
+    fun light(): ZoeData {
+        answeredInCycle = 0
+        for (i in intArrayOf(0, 5, 7)) { stepIdx = i; step() }
+        stepIdx = 0
+        val ok = answeredInCycle > 0
+        answeredInCycle = 0
+        if (!ok) throw ElmException("el carro no responde (¿apagado?)")
+        return snapshot()
+    }
+
     /** Foto de los últimos valores leídos. */
     fun snapshot(): ZoeData = ZoeData(
         soc = usoc, realSoc = real, soh = soh, tempC = temp, currentA = current, rangeKm = range,
