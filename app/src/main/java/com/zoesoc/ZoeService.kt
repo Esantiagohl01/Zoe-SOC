@@ -84,7 +84,9 @@ class ZoeService : Service() {
                 var resting = false
                 var lowCount = 0
                 var restStart = 0L
-                fun withLive(d: ZoeData) = ZoeTrip.apply(d.copy(speedKmh = speed, powerKw = power, fastTime = fastTime))
+                fun withLive(d: ZoeData) = ZoeTrip.apply(
+                    d.copy(speedKmh = speed, powerKw = power, fastTime = fastTime, rawTires = d.tires, tires = TireMap.apply(d.tires, prefs.tireMap)),
+                )
                 while (running) {
                     try {
                         if (ZoeState.appVisible) {

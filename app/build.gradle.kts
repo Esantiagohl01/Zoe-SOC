@@ -11,8 +11,8 @@ android {
         applicationId = "com.zoesoc"
         minSdk = 26
         targetSdk = 34
-        versionCode = 16
-        versionName = "2.9"
+        versionCode = 17
+        versionName = "3.0"
     }
 
     // Llave fija para que cada versión nueva se instale encima de la anterior

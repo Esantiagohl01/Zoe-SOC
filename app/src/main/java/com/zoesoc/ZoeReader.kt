@@ -21,7 +21,8 @@ data class ZoeData(
     val chargingKw: Double? = null,     // potencia de carga
     val availKwh: Double? = null,       // energía disponible
     val avgConsumption: Double? = null, // consumo promedio del carro (kWh/100 km)
-    val tires: Tires? = null,
+    val tires: Tires? = null,          // ya acomodadas por posición (TireMap)
+    val rawTires: Tires? = null,       // tal como llegan, por sensor de fábrica
     val extTemp: Double? = null,        // temperatura exterior
     val cabinTemp: Double? = null,      // temperatura dentro del carro
     val climOn: Boolean? = null,        // climatizador funcionando

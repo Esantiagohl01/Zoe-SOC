@@ -73,6 +73,10 @@ class Prefs(ctx: Context) {
     var refPsi: Int
         get() = p.getInt("refPsi", 35)
         set(v) = p.edit().putInt("refPsi", v).apply()
+    /** Qué sensor va en cada posición (DI, DD, TI, TD): 4 dígitos, p. ej. "0123" = de fábrica. */
+    var tireMap: String
+        get() = p.getString("tireMap", "0123")?.takeIf { TireMap.valid(it) } ?: "0123"
+        set(v) = p.edit().putString("tireMap", v).apply()
     var compact: Boolean
         get() = p.getBoolean("compact", false)
         set(v) = p.edit().putBoolean("compact", v).apply()

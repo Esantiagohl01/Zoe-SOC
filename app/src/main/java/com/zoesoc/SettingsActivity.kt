@@ -101,6 +101,11 @@ class SettingsActivity : Activity() {
         btns.addView(Button(this).apply { text = "Detener"; setOnClickListener { ZoeService.stop(this@SettingsActivity) } },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         add(btns)
+        add(text(13f, textDim).apply {
+            text = "Mantenimiento ›"
+            setPadding(0, px(10), 0, px(6))
+            setOnClickListener { startActivity(Intent(this@SettingsActivity, MaintenanceActivity::class.java)) }
+        }, 10)
 
         add(text(15f, textMain).apply { text = "Registro"; typeface = Typeface.DEFAULT_BOLD }, 16)
         tvLog = text(11f, textDim).apply { typeface = Typeface.MONOSPACE; setTextIsSelectable(true) }
