@@ -423,33 +423,46 @@ class DashView(ctx: Context) : View(ctx) {
             c.drawRoundRect(20f, 302f, 980f, 512f, 20f, 20f, fill)
             txt(c, "Potencia · últimos 15 min", 40f, 332f, 22f, dimC)
         }
-        fun y(kw: Double) = (yTop + (70.0 - kw.coerceIn(-40.0, 70.0)) / 110.0 * (yBot - yTop)).toFloat()
-        val y0 = y(0.0); val y30 = y(30.0)
+        // Escala: normalmente +15 a −15; si algo se sale, se abre hasta cubrirlo (máx. +70 / −40), en pasos de 5.
+        val v = PowerLog.series()
+        val hi = v.filterNotNull().maxOrNull() ?: 0.0
+        val lo = v.filterNotNull().minOrNull() ?: 0.0
+        val top = maxOf(15.0, Math.ceil(hi / 5) * 5).coerceAtMost(70.0)
+        val bot = minOf(-15.0, Math.floor(lo / 5) * 5).coerceAtLeast(-40.0)
+        fun y(kw: Double) = (yTop + (top - kw.coerceIn(bot, top)) / (top - bot) * (yBot - yTop)).toFloat()
+        val y0 = y(0.0)
+        val show30 = top >= 35.0
+        val y30 = y(30.0)
         // guías
         if (big) {
-            line.strokeWidth = 1.5f; line.color = 0xFF2A3038.toInt()
-            c.drawLine(gx0, y(70.0), gx1, y(70.0), line)
-            c.drawLine(gx0, y(-40.0), gx1, y(-40.0), line)
+            line.strokeWidth = 1.5f; line.color = 0x80FFFFFF.toInt()
+            c.drawLine(gx0, y(top), gx1, y(top), line)
+            c.drawLine(gx0, y(bot), gx1, y(bot), line)
             for (k in 1..2) { val tx = gx0 + (gx1 - gx0) * k / 3f; c.drawLine(tx, yTop, tx, yBot, line) }
         }
-        line.strokeWidth = 1.5f; line.color = 0xFF3A4048.toInt()
-        var gx = gx0
-        while (gx < gx1) { c.drawLine(gx, y30, minOf(gx + 6f, gx1), y30, line); gx += 14f }
-        line.strokeWidth = 2f; line.color = 0xFF4A525C.toInt()
+        // eje vertical a la izquierda
+        line.strokeWidth = 2.5f; line.color = 0xFFFFFFFF.toInt()
+        c.drawLine(gx0, yTop, gx0, yBot, line)
+        if (show30) {
+            line.strokeWidth = 2f; line.color = 0xB3FFFFFF.toInt()
+            var gx = gx0
+            while (gx < gx1) { c.drawLine(gx, y30, minOf(gx + 6f, gx1), y30, line); gx += 14f }
+            txt(c, "30", lx, y30 + ls * 0.35f, ls, textC, align = Paint.Align.RIGHT)
+        }
+        line.strokeWidth = 2.5f; line.color = 0xFFFFFFFF.toInt()
         c.drawLine(gx0, y0, gx1, y0, line)
-        txt(c, "70", lx, y(70.0) + ls * 0.35f, ls, 0xFF5A636C.toInt(), align = Paint.Align.RIGHT)
-        txt(c, "30", lx, y30 + ls * 0.35f, ls, dimC, align = Paint.Align.RIGHT)
-        txt(c, "0", lx, y0 + ls * 0.35f, ls, dimC, align = Paint.Align.RIGHT)
-        txt(c, "−40", lx, y(-40.0) + ls * 0.35f, ls, 0xFF5A636C.toInt(), align = Paint.Align.RIGHT)
+        fun kwLabel(k: Double) = (if (k < 0) "−" else "+") + Math.round(Math.abs(k))
+        txt(c, kwLabel(top), lx, y(top) + ls * 0.35f, ls, textC, align = Paint.Align.RIGHT)
+        txt(c, "0", lx, y0 + ls * 0.35f, ls, textC, align = Paint.Align.RIGHT)
+        txt(c, kwLabel(bot), lx, y(bot) + ls * 0.35f, ls, textC, align = Paint.Align.RIGHT)
         if (big) {
-            txt(c, "−15 min", gx0, 540f, 20f, dimC)
-            txt(c, "−10", gx0 + (gx1 - gx0) / 3f, 540f, 20f, dimC, align = Paint.Align.CENTER)
-            txt(c, "−5", gx0 + (gx1 - gx0) * 2 / 3f, 540f, 20f, dimC, align = Paint.Align.CENTER)
-            txt(c, "ahora", gx1, 540f, 20f, dimC, align = Paint.Align.RIGHT)
+            txt(c, "−15 min", gx0, 540f, 20f, textC)
+            txt(c, "−10", gx0 + (gx1 - gx0) / 3f, 540f, 20f, textC, align = Paint.Align.CENTER)
+            txt(c, "−5", gx0 + (gx1 - gx0) * 2 / 3f, 540f, 20f, textC, align = Paint.Align.CENTER)
+            txt(c, "ahora", gx1, 540f, 20f, textC, align = Paint.Align.RIGHT)
             txt(c, "Toca para volver", 40f, 580f, 20f, 0xFF5A636C.toInt())
         }
 
-        val v = PowerLog.series()
         val n = v.size
         val dx = (gx1 - gx0) / (n - 1)
         line.strokeWidth = if (big) 6f else 4f
