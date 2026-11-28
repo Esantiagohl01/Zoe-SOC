@@ -25,7 +25,7 @@ class DashView(ctx: Context) : View(ctx) {
     var onAutoKit: (() -> Unit)? = null
     /** true si AutoKit está instalado (se muestra el botón del teléfono). */
     var hasAutoKit = false
-    private val prefs = Prefs(ctx)
+    private val prefs = Prefs(ctx).also { Theme.load(it) }
     var page: Int = prefs.page.coerceIn(0, PAGES - 1)
         private set
     private var data: ZoeData? = null
@@ -54,13 +54,14 @@ class DashView(ctx: Context) : View(ctx) {
     }
 
     // ---------- colores y pinturas ----------
-    private val bgC = 0xFF0B0E11.toInt()
-    private val textC = 0xFFE9EEF3.toInt()
-    private val dimC = 0xFF8D97A1.toInt()
-    private val subC = 0xFFB8C0C8.toInt()
-    private val panelC = 0xFF151A1F.toInt()
-    private val trackC = 0xFF1F242A.toInt()
-    private val lightC = 0xFFE6ECF2.toInt()
+    // Colores: vienen de Theme (noche o día); solo cambian colores, nunca posiciones.
+    private val bgC get() = Theme.bg
+    private val textC get() = Theme.text
+    private val dimC get() = Theme.dim
+    private val subC get() = Theme.sub
+    private val panelC get() = Theme.panel
+    private val trackC get() = Theme.track
+    private val lightC get() = Theme.powerFill
     private val needleC = 0xFFFF5A36.toInt()
 
     private val tp = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -168,6 +169,7 @@ class DashView(ctx: Context) : View(ctx) {
         }
         val title = if (page == 1) "Detalle" else "Zoe · $st"
         txt(c, title.take(40), 24f, 40f, 26f, dimC)
+        drawSunMoon(c)
         // Engranaje (abre ajustes)
         val gx = 960f; val gy = 34f
         line.strokeWidth = 5f; line.color = dimC
@@ -179,12 +181,32 @@ class DashView(ctx: Context) : View(ctx) {
         }
     }
 
+    /** Sol (de noche: pasa a día) o luna (de día: pasa a noche), a la izquierda del engranaje. */
+    private fun drawSunMoon(c: Canvas) {
+        val cx = 888f; val cy = 34f
+        if (Theme.day) {
+            // Luna creciente
+            fill.color = Theme.sunMoon
+            c.drawCircle(cx, cy, 16f, fill)
+            fill.color = bgC
+            c.drawCircle(cx + 9f, cy - 6f, 13f, fill)
+        } else {
+            fill.color = Theme.sunMoon
+            c.drawCircle(cx, cy, 9f, fill)
+            line.color = Theme.sunMoon; line.strokeWidth = 3.5f
+            for (i in 0 until 8) {
+                val a = i * Math.PI / 4
+                c.drawLine(cx + 14 * cos(a).toFloat(), cy + 14 * sin(a).toFloat(), cx + 19 * cos(a).toFloat(), cy + 19 * sin(a).toFloat(), line)
+            }
+        }
+    }
+
     /** Señal de límite (toque para cambiar: Auto → 50 → 80 → apagado). Parpadea suave si te pasas. */
     private fun drawLimitSign(c: Canvas) {
         val lim = limiter.limit
         val cx = SIGN_X; val cy = SIGN_Y; val r = 44f
         if (lim == null) {
-            line.color = 0xFF3A4048.toInt(); line.strokeWidth = 6f
+            line.color = Theme.dotOff; line.strokeWidth = 6f
             c.drawCircle(cx, cy, r, line)
             txt(c, "sin", cx, cy - 4, 24f, dimC, align = Paint.Align.CENTER)
             txt(c, "límite", cx, cy + 22, 22f, dimC, align = Paint.Align.CENTER)
@@ -229,7 +251,7 @@ class DashView(ctx: Context) : View(ctx) {
 
     private fun drawDots(c: Canvas) {
         for (i in 0 until PAGES) {
-            fill.color = if (i == page) textC else 0xFF3A4048.toInt()
+            fill.color = if (i == page) textC else Theme.dotOff
             c.drawCircle(500f + (i - (PAGES - 1) / 2f) * 22f, 588f, 5f, fill)
         }
     }
@@ -256,7 +278,7 @@ class DashView(ctx: Context) : View(ctx) {
             d?.extTemp?.let { "Ext. " + Fmt.f(it, 0) + " °C" }, d?.cabinTemp?.let { "Int. " + Fmt.f(it, 0) + " °C" },
         ).joinToString(" · ")
         // Línea 1: autonomía · Batería + temperatura con color
-        val lc = 0xFFC8D0D8.toInt()
+        val lc = Theme.unit
         var lx = x0
         d?.rangeKm?.let { val t = "$it km"; txt(c, t, lx, 182f, 28f, lc); lx += tw(t, 28f, false) }
         d?.tempC?.let {
@@ -264,7 +286,7 @@ class DashView(ctx: Context) : View(ctx) {
             txt(c, pre, lx, 182f, 28f, lc); lx += tw(pre, 28f, false)
             txt(c, Fmt.f(it, 0) + " °C", lx, 182f, 28f, Colors.batTemp(it), true)
         }
-        txt(c, l2, x0, 218f, 28f, 0xFFC8D0D8.toInt())
+        txt(c, l2, x0, 218f, 28f, Theme.unit)
 
         val bx0 = 470f; val bx1 = 950f
         if (charging && d != null) {
@@ -301,12 +323,12 @@ class DashView(ctx: Context) : View(ctx) {
             val inst = if (live(d)) smoothInst(d) else null
             val iv = inst?.let { Fmt.f(it, 1) } ?: "--"
             txt(c, iv, x0, 412f, 54f, textC, true)
-            txt(c, " kWh/100 km", x0 + tw(iv, 54f, true), 412f, 26f, 0xFFC8D0D8.toInt())
+            txt(c, " kWh/100 km", x0 + tw(iv, 54f, true), 412f, 26f, Theme.unit)
             txt(c, "Instantáneo", bx1, 412f, 26f, dimC, align = Paint.Align.RIGHT)
             val pw = power(d)
             txt(c, "regen", bx0, 466f, 30f, Colors.GREEN, true)
             txt(c, pw?.let { Fmt.f(it, 1) + " kW" } ?: "-- kW", bx1, 466f, 30f, textC, true, Paint.Align.RIGHT)
-            fill.color = 0xFF2A3038.toInt()
+            fill.color = Theme.powerTrack
             c.drawRoundRect(bx0, 484f, bx1, 504f, 10f, 10f, fill)
             // Escala −30 kW (regeneración) a +70 kW: el cero queda al 30 %.
             val zx = bx0 + (bx1 - bx0) * 0.30f
@@ -322,7 +344,7 @@ class DashView(ctx: Context) : View(ctx) {
             txt(c, "Promedio ", px, 560f, 26f, dimC); px += tw("Promedio ", 26f, false)
             val avg = d?.avgConsumption?.let { Fmt.f(it, 1) } ?: "--"
             txt(c, avg, px, 560f, 26f, textC, true); px += tw(avg, 26f, true)
-            txt(c, " kWh/100 km", px, 560f, 26f, 0xFFC8D0D8.toInt())
+            txt(c, " kWh/100 km", px, 560f, 26f, Theme.unit)
         }
     }
 
@@ -341,7 +363,7 @@ class DashView(ctx: Context) : View(ctx) {
 
     /** Página 2: batería, llantas, cargas y gráfica de potencia de los últimos 15 min. */
     private fun drawDetail(c: Canvas, d: ZoeData?) {
-        val lc = 0xFFC8D0D8.toInt()
+        val lc = Theme.unit
         // Batería (tabla)
         fill.color = panelC
         c.drawRoundRect(20f, 70f, 360f, 290f, 20f, 20f, fill)
@@ -421,10 +443,11 @@ class DashView(ctx: Context) : View(ctx) {
         } else {
             fill.color = panelC
             c.drawRoundRect(20f, 302f, 980f, 512f, 20f, 20f, fill)
-            txt(c, "Potencia · últimos 10 min", 40f, 332f, 22f, dimC)
+            txt(c, "Potencia · últimos 5 min", 40f, 332f, 22f, dimC)
         }
         // Escala: normalmente +15 a −15; si algo se sale, se abre hasta cubrirlo (máx. +70 / −40), en pasos de 5.
-        val v = PowerLog.series()
+        // Grande: 10 min. Pequeña (hoja 2): 5 min, para que no se vea solo como picos.
+        val v = PowerLog.series(if (big) PowerLog.BINS else PowerLog.BINS / 2)
         val hi = v.filterNotNull().maxOrNull() ?: 0.0
         val lo = v.filterNotNull().minOrNull() ?: 0.0
         val top = maxOf(15.0, Math.ceil(hi / 5) * 5).coerceAtMost(70.0)
@@ -435,21 +458,21 @@ class DashView(ctx: Context) : View(ctx) {
         val y15 = y(15.0)
         // guías
         if (big) {
-            line.strokeWidth = 1.5f; line.color = 0x80FFFFFF.toInt()
+            line.strokeWidth = 1.5f; line.color = Theme.axis; line.alpha = 128
             c.drawLine(gx0, y(top), gx1, y(top), line)
             c.drawLine(gx0, y(bot), gx1, y(bot), line)
             val tx = (gx0 + gx1) / 2; c.drawLine(tx, yTop, tx, yBot, line)
         }
         // eje vertical a la izquierda
-        line.strokeWidth = 2.5f; line.color = 0xFFFFFFFF.toInt()
+        line.strokeWidth = 2.5f; line.color = Theme.axis
         c.drawLine(gx0, yTop, gx0, yBot, line)
         if (show15) {
-            line.strokeWidth = 2f; line.color = 0xB3FFFFFF.toInt()
+            line.strokeWidth = 2f; line.color = Theme.axis; line.alpha = 179
             var gx = gx0
             while (gx < gx1) { c.drawLine(gx, y15, minOf(gx + 6f, gx1), y15, line); gx += 14f }
             txt(c, "15", lx, y15 + ls * 0.35f, ls, textC, align = Paint.Align.RIGHT)
         }
-        line.strokeWidth = 2.5f; line.color = 0xFFFFFFFF.toInt()
+        line.strokeWidth = 2.5f; line.color = Theme.axis
         c.drawLine(gx0, y0, gx1, y0, line)
         fun kwLabel(k: Double) = (if (k < 0) "−" else "+") + Math.round(Math.abs(k))
         txt(c, kwLabel(top), lx, y(top) + ls * 0.35f, ls, textC, align = Paint.Align.RIGHT)
@@ -459,18 +482,32 @@ class DashView(ctx: Context) : View(ctx) {
             txt(c, "−10 min", gx0, 540f, 20f, textC)
             txt(c, "−5", (gx0 + gx1) / 2, 540f, 20f, textC, align = Paint.Align.CENTER)
             txt(c, "ahora", gx1, 540f, 20f, textC, align = Paint.Align.RIGHT)
-            txt(c, "Toca para volver", 40f, 580f, 20f, 0xFF5A636C.toInt())
+            txt(c, "Toca para volver", 40f, 580f, 20f, Theme.faint)
         }
 
         val n = v.size
         val dx = (gx1 - gx0) / (n - 1)
         line.strokeWidth = if (big) 3f else 2.5f
+        // Cada tramo se parte donde cruza 0, 15 y 32 kW: cada pedazo con su color exacto.
+        fun colorOf(kw: Double) = when { kw < 0 -> Theme.regen; kw <= 15 -> Theme.green; kw <= 32 -> Theme.orange; else -> Theme.hot }
+        val cuts = doubleArrayOf(0.0, 15.0, 32.0)
         for (i in 1 until n) {
             val a = v[i - 1] ?: continue
             val b = v[i] ?: continue
-            val mid = (a + b) / 2
-            line.color = when { mid < 0 -> BLUE_REGEN; mid <= 15 -> Colors.GREEN; mid <= 32 -> ORANGE_PWR; else -> RED_PWR }
-            c.drawLine(gx0 + (i - 1) * dx, y(a), gx0 + i * dx, y(b), line)
+            val xa = gx0 + (i - 1) * dx
+            // fracciones (0..1) donde el tramo cruza un límite
+            val ts = ArrayList<Double>(5)
+            ts.add(0.0)
+            for (k in cuts) if ((a - k) * (b - k) < 0) ts.add((k - a) / (b - a))
+            ts.add(1.0)
+            ts.sort()
+            for (j in 1 until ts.size) {
+                val t0 = ts[j - 1]; val t1 = ts[j]
+                if (t1 - t0 < 1e-6) continue
+                val k0 = a + (b - a) * t0; val k1 = a + (b - a) * t1
+                line.color = colorOf((k0 + k1) / 2)
+                c.drawLine(xa + dx * t0.toFloat(), y(k0), xa + dx * t1.toFloat(), y(k1), line)
+            }
         }
         if (v.all { it == null }) txt(c, "Se llena mientras manejas", (gx0 + gx1) / 2, y0 - 14f, 22f, dimC, align = Paint.Align.CENTER)
     }
@@ -504,11 +541,11 @@ class DashView(ctx: Context) : View(ctx) {
         val right = wNum + gap + ur
         val x = cx - (left + right) / 2
         txt(c, kStr, x, 163f, 84f, textC, true)
-        txt(c, "km", x + wNum + gap, 163f, 34f, 0xFFC8D0D8.toInt())
+        txt(c, "km", x + wNum + gap, 163f, 34f, Theme.unit)
         val kwh = d?.tripKwh
         val cons = if (km != null && kwh != null && km >= 0.5) Fmt.f(kwh / km * 100, 1) else "--"
         val line2 = (kwh?.let { Fmt.f(it, 1) } ?: "--") + " kWh · " + cons + " kWh/100"
-        txtInk(c, line2, cx, 208f, 28f, 0xFFC8D0D8.toInt())
+        txtInk(c, line2, cx, 208f, 28f, Theme.unit)
     }
 
     /** Presiones junto a cada llanta, por fuera del carro (izquierda alineada hacia el carro). */
@@ -543,7 +580,13 @@ class DashView(ctx: Context) : View(ctx) {
             if (graphBig) { graphBig = false; invalidate(); return true } // cualquier toque cierra la gráfica grande
             when {
                 page == 1 && x in 20f..980f && y in 302f..512f && !(x < 120 && y > 500) -> { graphBig = true; invalidate() }
-                x > 900 && y < 90 -> onSettings?.invoke()
+                x > 925 && y < 90 -> onSettings?.invoke()
+                x in 845f..922f && y < 90 -> {
+                    Theme.day = !Theme.day
+                    prefs.dayMode = Theme.day
+                    ZoeState.touch() // la burbuja también cambia
+                    invalidate()
+                }
                 page == 0 && data?.charging != true && abs(x - SIGN_X) < 60 && abs(y - SIGN_Y) < 60 -> { limiter.cycle(); invalidate() }
                 x < 120 && y > 500 -> onHome?.invoke()
                 page == 0 && hasAutoKit && x in (PHONE_X - 55f)..(PHONE_X + 55f) && y > 495 -> onAutoKit?.invoke()
@@ -562,9 +605,7 @@ class DashView(ctx: Context) : View(ctx) {
 
     companion object {
         const val PAGES = 2
-        const val BLUE_REGEN = 0xFF4A90D9.toInt()
-        const val ORANGE_PWR = 0xFFF08A24.toInt()
-        const val RED_PWR = 0xFFE04848.toInt()
+
         /** Intervalo de las animaciones (latido de carga, flujo, señal parpadeando). */
         const val ANIM_MS = 110L
         /** Posición del teléfono: a la derecha del carro, a la misma altura que la casita. */

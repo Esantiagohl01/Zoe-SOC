@@ -97,6 +97,9 @@ object CarArt {
             tireP.color = tires[i]
             c.drawRoundRect(tp[i][0], tp[i][1], tp[i][0] + 10f, tp[i][1] + 17f, 3f, 3f, tireP)
         }
+        bodyP.color = Theme.carBody
+        outline.color = Theme.carOutline; outline.strokeWidth = Theme.carOutlineW
+        packEmpty.color = Theme.packEmpty
         c.drawPath(body, bodyP)
         if (showPack) {
             val l = 16f; val r = 44f; val t = 34f; val b = 80f

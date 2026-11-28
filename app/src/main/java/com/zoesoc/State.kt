@@ -104,6 +104,10 @@ class Prefs(ctx: Context) {
         get() = p.getInt("limitMode", 0)
         set(v) = p.edit().putInt("limitMode", v).apply()
     /** Pantalla de la app: 0 Digital, 1 Detalle. */
+    /** true = colores de día (fondo claro). */
+    var dayMode: Boolean
+        get() = p.getBoolean("dayMode", false)
+        set(v) = p.edit().putBoolean("dayMode", v).apply()
     var page: Int
         get() = p.getInt("page2", 0)
         set(v) = p.edit().putInt("page2", v).apply()
@@ -247,11 +251,12 @@ object PowerLog {
         sum[i] += kw; cnt[i]++
     }
 
-    /** Valores de la más vieja a la más nueva (null = sin dato). */
-    @Synchronized fun series(now: Long = System.currentTimeMillis()): Array<Double?> {
+    /** Las últimas [count] cajitas, de la más vieja a la más nueva (null = sin dato). */
+    @Synchronized fun series(count: Int = BINS, now: Long = System.currentTimeMillis()): Array<Double?> {
         val last = now / BIN_MS
-        return Array(BINS) { k ->
-            val id = last - (BINS - 1 - k)
+        val n = count.coerceIn(2, BINS)
+        return Array(n) { k ->
+            val id = last - (n - 1 - k)
             val i = (id % BINS).toInt()
             if (binId[i] == id && cnt[i] > 0) sum[i] / cnt[i] else null
         }

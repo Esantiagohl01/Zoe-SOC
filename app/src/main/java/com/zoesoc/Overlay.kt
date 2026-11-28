@@ -22,7 +22,7 @@ import kotlin.math.roundToInt
 /** Burbuja flotante arrastrable. Tocarla alterna entre vista completa (con carro) y compacta. */
 class Overlay(private val ctx: Context) {
     private val wm = ctx.getSystemService(WindowManager::class.java)
-    private val prefs = Prefs(ctx)
+    private val prefs = Prefs(ctx).also { Theme.load(it) }
     private var view: BubbleView? = null
     private var params: WindowManager.LayoutParams? = null
 
@@ -211,6 +211,8 @@ class BubbleView(ctx: Context) : View(ctx) {
     override fun onDraw(c: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
+        bg.color = Theme.bubbleBg
+        small.color = Theme.bubbleSmall
         c.drawRoundRect(0f, 0f, w, h, dp(16f), dp(16f), bg)
         val d = data
         val s = d?.displaySoc
@@ -239,7 +241,7 @@ class BubbleView(ctx: Context) : View(ctx) {
         )
 
         val x0 = dp(68f)
-        small.textSize = sp(11f); small.color = 0xFFB8C0C8.toInt()
+        small.textSize = sp(11f); small.color = Theme.bubbleSmall
         c.drawText("Batería", x0, dp(17f), small)
 
         // Porcentaje: entero grande, decimal y % pequeños.
@@ -264,7 +266,7 @@ class BubbleView(ctx: Context) : View(ctx) {
 
         when {
             status != "OK" -> {
-                small.textSize = sp(12f); small.color = 0xFFD5DCE3.toInt()
+                small.textSize = sp(12f); small.color = Theme.bubbleText
                 c.drawText(status.take(14), x0, dp(72f), small)
             }
             charging && d != null -> {
@@ -272,7 +274,7 @@ class BubbleView(ctx: Context) : View(ctx) {
                 c.drawText(d.chargingKw?.let { Fmt.f(it, 1) + " kW" } ?: "Cargando", x0, dp(72f), num)
                 val eta = d.minutesTo(80.0)?.let { "80 % · " + Fmt.durShort(it) }
                     ?: d.minutesTo(100.0)?.let { "100 % · " + Fmt.durShort(it) }
-                small.textSize = sp(12f); small.color = 0xFFD5DCE3.toInt()
+                small.textSize = sp(12f); small.color = Theme.bubbleText
                 if (eta != null) c.drawText(eta, x0, dp(92f), small)
             }
             else -> d?.tempC?.let {

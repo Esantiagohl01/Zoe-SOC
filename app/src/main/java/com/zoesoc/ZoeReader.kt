@@ -323,24 +323,24 @@ class ZoeReader(private val elm: Elm327, private val log: (String) -> Unit) {
 }
 
 object Colors {
-    val GREEN = 0xFF69F0AE.toInt()
-    val AMBER = 0xFFFFC107.toInt()
-    val RED = 0xFFFF5252.toInt()
-    val GRAY = 0xFF5F6670.toInt()
+    val GREEN get() = Theme.green
+    val AMBER get() = Theme.amber
+    val RED get() = Theme.red
+    val GRAY get() = Theme.gray
 
     /** Verde ≥ 30 %, amarillo < 30 %, rojo < 20 %. */
     fun soc(s: Double?): Int = when {
-        s == null -> 0xFFFFFFFF.toInt()
+        s == null -> Theme.text
         s < 20 -> RED
         s < 30 -> AMBER
         else -> GREEN
     }
 
-    val BLUE = 0xFF64B5F6.toInt()
+    val BLUE get() = Theme.blue
 
     /** Temperatura de la batería: azul < 10 °C, verde 10–29, amarillo 30–39, rojo ≥ 40. */
     fun batTemp(t: Double?): Int = when {
-        t == null -> 0xFFE9EEF3.toInt()
+        t == null -> Theme.text
         t < 10 -> BLUE
         t < 30 -> GREEN
         t < 40 -> AMBER
