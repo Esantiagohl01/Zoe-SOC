@@ -26,11 +26,8 @@ class DashView(ctx: Context) : View(ctx) {
     /** true si AutoKit está instalado (se muestra el botón del teléfono). */
     var hasAutoKit = false
     private val prefs = Prefs(ctx)
-    /** Hojas: 0 Digital, 1 Detalle y, si está activa la prueba, 2 Navegación. */
-    private val pages: Int get() = if (prefs.navPage) 3 else 2
-    var page: Int = prefs.page.coerceIn(0, 2)
+    var page: Int = prefs.page.coerceIn(0, PAGES - 1)
         private set
-    private val digital: Boolean get() = page == 0 || page == 2
     private var data: ZoeData? = null
     private var status = ""
 
@@ -147,8 +144,7 @@ class DashView(ctx: Context) : View(ctx) {
         if (graphBig && page == 1) {
             drawPowerGraph(c, big = true)
         } else {
-            if (page >= pages) page = 0
-            if (page == 1) drawDetail(c, d) else drawDigital(c, d, nav = page == 2)
+            if (page == 0) drawDigital(c, d) else drawDetail(c, d)
             drawHeader(c, d)
             drawDots(c)
             drawHome(c)
@@ -160,7 +156,7 @@ class DashView(ctx: Context) : View(ctx) {
         // Un solo temporizador, solo para animaciones (carga o señal parpadeando).
         removeCallbacks(tick)
         // ~9 cuadros por segundo: se ve suave y la caja trabaja menos de la mitad que a 20.
-        if (digital && (chargeAnim(d) || limiter.over)) postDelayed(tick, ANIM_MS)
+        if (page == 0 && (chargeAnim(d) || limiter.over)) postDelayed(tick, ANIM_MS)
     }
 
     private fun drawHeader(c: Canvas, d: ZoeData?) {
@@ -170,7 +166,7 @@ class DashView(ctx: Context) : View(ctx) {
             status == "OK" -> "conectado"
             else -> status
         }
-        val title = when (page) { 1 -> "Detalle"; 2 -> "Navegación"; else -> "Zoe · $st" }
+        val title = if (page == 1) "Detalle" else "Zoe · $st"
         txt(c, title.take(40), 24f, 40f, 26f, dimC)
         // Engranaje (abre ajustes)
         val gx = 960f; val gy = 34f
@@ -209,7 +205,7 @@ class DashView(ctx: Context) : View(ctx) {
 
     /** Teléfono blanco abajo, al otro lado del carro (a espejo de la casita): abre AutoKit (CarPlay). */
     private fun drawAutoKit(c: Canvas) {
-        if (!hasAutoKit || !digital) return // en Detalle el carro ocupa ese lugar
+        if (!hasAutoKit || page != 0) return // en Detalle el carro ocupa ese lugar
         val x = PHONE_X; val y = 548f; val k = 1.3f
         fill.color = textC
         c.drawRoundRect(x - 16 * k, y - 26 * k, x + 16 * k, y + 26 * k, 8f * k, 8f * k, fill)
@@ -232,28 +228,24 @@ class DashView(ctx: Context) : View(ctx) {
     }
 
     private fun drawDots(c: Canvas) {
-        for (i in 0 until pages) {
+        for (i in 0 until PAGES) {
             fill.color = if (i == page) textC else 0xFF3A4048.toInt()
-            c.drawCircle(500f + (i - (pages - 1) / 2f) * 22f, 588f, 5f, fill)
+            c.drawCircle(500f + (i - (PAGES - 1) / 2f) * 22f, 588f, 5f, fill)
         }
     }
 
     /** B · Digital: carro grande con presiones, SOC, velocidad grande y barra de potencia (o la carga). */
-    private fun drawDigital(c: Canvas, d: ZoeData?, nav: Boolean = false) {
+    private fun drawDigital(c: Canvas, d: ZoeData?) {
         val charging = d?.charging == true
+        // Columna izquierda: reloj analógico arriba y carro más pequeño pegado abajo.
         val colX = 235f
-        if (nav && NavState.active) {
-            drawNav(c, d) // PRUEBA navegación
-        } else {
-            // Columna izquierda: viaje arriba y carro pegado abajo.
-            drawTrip(c, colX, d)
-            val carH = 322f
-            val carW = carH * CarArt.W / CarArt.H
-            val carTop = 574f - carH
-            car(c, colX, carTop, carH, d, pulseAlpha(d))
-            // Las presiones van pegadas al borde exterior de cada llanta.
-            tirePsi(c, d, colX - carW / 2 + carW * 0.5f / CarArt.W - 10f, colX - carW / 2 + carW * 59.5f / CarArt.W + 10f, carTop, carH, 30f)
-        }
+        drawTrip(c, colX, d)
+        val carH = 322f
+        val carW = carH * CarArt.W / CarArt.H
+        val carTop = 574f - carH
+        car(c, colX, carTop, carH, d, pulseAlpha(d))
+        // Las presiones van pegadas al borde exterior de cada llanta.
+        tirePsi(c, d, colX - carW / 2 + carW * 0.5f / CarArt.W - 10f, colX - carW / 2 + carW * 59.5f / CarArt.W + 10f, carTop, carH, 30f)
 
         val x0 = 470f
         val s = d?.displaySoc
@@ -411,47 +403,6 @@ class DashView(ctx: Context) : View(ctx) {
         c.drawCircle(cx + 6, base + 4, 3.5f, fill); c.drawCircle(cx + 26, base + 4, 3.5f, fill)
     }
 
-    // ---------- PRUEBA navegación (hoja 3): se puede borrar junto con Nav.kt ----------
-    private val navDst = RectF()
-
-    /** Texto centrado que se achica hasta caber en [maxW]. */
-    private fun txtFit(c: Canvas, str: String, cx: Float, y: Float, size: Float, maxW: Float, color: Int, bold: Boolean) {
-        var sz = size
-        while (sz > 16f && tw(str, sz, bold) > maxW) sz -= 2f
-        var t = str
-        if (tw(t, sz, bold) > maxW) { while (t.length > 3 && tw("$t…", sz, bold) > maxW) t = t.dropLast(1); t += "…" }
-        txt(c, t, cx, y, sz, color, bold, Paint.Align.CENTER)
-    }
-
-    private fun drawNav(c: Canvas, d: ZoeData?) {
-        fill.color = 0xFF16202C.toInt()
-        c.drawRoundRect(20f, 70f, 440f, 495f, 20f, 20f, fill)
-        val cx = 230f
-        val ic = NavState.icon
-        if (ic != null) {
-            navDst.set(cx - 75f, 95f, cx + 75f, 245f)
-            c.drawBitmap(ic, null, navDst, fill.apply { color = 0xFFFFFFFF.toInt() })
-        } else {
-            // Flecha genérica si Maps no manda ícono
-            val p = Path()
-            p.moveTo(cx, 100f); p.lineTo(cx + 55f, 165f); p.lineTo(cx + 22f, 165f); p.lineTo(cx + 22f, 240f)
-            p.lineTo(cx - 22f, 240f); p.lineTo(cx - 22f, 165f); p.lineTo(cx - 55f, 165f); p.close()
-            fill.color = textC; c.drawPath(p, fill)
-        }
-        txtFit(c, NavState.title ?: "", cx, 320f, 64f, 390f, textC, true)
-        NavState.text?.let { txtFit(c, it, cx, 368f, 30f, 390f, 0xFFC8D0D8.toInt(), false) }
-        line.strokeWidth = 2f; line.color = 0xFF2A3646.toInt()
-        c.drawLine(60f, 392f, 400f, 392f, line)
-        NavState.sub?.let { txtFit(c, it, cx, 430f, 28f, 390f, Colors.GREEN, true) }
-        // Llegas con ~X %: km que faltan × consumo promedio, sobre la energía disponible.
-        val km = NavState.remainingKm()
-        val soc = d?.displaySoc; val avail = d?.availKwh; val cons = d?.avgConsumption
-        if (km != null && soc != null && avail != null && cons != null && avail > 0.5) {
-            val left = ((avail - km * cons / 100) / avail * soc).coerceAtLeast(0.0)
-            txt(c, "Llegas con ~" + Fmt.f(left, 0) + " %", cx, 474f, 26f, Colors.soc(left), true, Paint.Align.CENTER)
-        }
-    }
-
     /** true = la gráfica de potencia ocupa toda la pantalla (se abre tocándola en la hoja 2). */
     private var graphBig = false
 
@@ -581,9 +532,9 @@ class DashView(ctx: Context) : View(ctx) {
             when {
                 page == 1 && x in 20f..980f && y in 302f..512f && !(x < 120 && y > 500) -> { graphBig = true; invalidate() }
                 x > 900 && y < 90 -> onSettings?.invoke()
-                digital && data?.charging != true && abs(x - SIGN_X) < 60 && abs(y - SIGN_Y) < 60 -> { limiter.cycle(); invalidate() }
+                page == 0 && data?.charging != true && abs(x - SIGN_X) < 60 && abs(y - SIGN_Y) < 60 -> { limiter.cycle(); invalidate() }
                 x < 120 && y > 500 -> onHome?.invoke()
-                digital && hasAutoKit && x in (PHONE_X - 55f)..(PHONE_X + 55f) && y > 495 -> onAutoKit?.invoke()
+                page == 0 && hasAutoKit && x in (PHONE_X - 55f)..(PHONE_X + 55f) && y > 495 -> onAutoKit?.invoke()
                 y > 560 && x in 420f..580f -> go(if (x < 500) -1 else 1) // tocar los puntitos también cambia
             }
             return true
@@ -592,12 +543,13 @@ class DashView(ctx: Context) : View(ctx) {
 
     private fun go(delta: Int) {
         graphBig = false
-        page = (page + delta + pages) % pages
+        page = (page + delta + PAGES) % PAGES
         prefs.page = page
         invalidate()
     }
 
     companion object {
+        const val PAGES = 2
         const val BLUE_REGEN = 0xFF4A90D9.toInt()
         /** Intervalo de las animaciones (latido de carga, flujo, señal parpadeando). */
         const val ANIM_MS = 110L

@@ -54,17 +54,6 @@
             android:name=".MaintenanceActivity"
             android:exported="false" />
 
-        <!-- PRUEBA navegación: lee la notificación de Google Maps (solo si se activa en Mantenimiento) -->
-        <service
-            android:name=".NavListener"
-            android:exported="true"
-            android:label="Zoe SOC · navegación"
-            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
-            <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService" />
-            </intent-filter>
-        </service>
-
         <service
             android:name=".ZoeService"
             android:exported="false"

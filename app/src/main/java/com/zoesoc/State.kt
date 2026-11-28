@@ -104,10 +104,6 @@ class Prefs(ctx: Context) {
         get() = p.getInt("limitMode", 0)
         set(v) = p.edit().putInt("limitMode", v).apply()
     /** Pantalla de la app: 0 Digital, 1 Detalle. */
-    /** Prueba: hoja 3 con navegación de Google Maps. */
-    var navPage: Boolean
-        get() = p.getBoolean("navPage", false)
-        set(v) = p.edit().putBoolean("navPage", v).apply()
     var page: Int
         get() = p.getInt("page2", 0)
         set(v) = p.edit().putInt("page2", v).apply()

@@ -88,24 +88,6 @@ class MaintenanceActivity : Activity() {
         btn("Restablecer") { "0123" }
         add(row, 10)
 
-        // PRUEBA navegación
-        add(label(15f, 0xFFE9EEF3.toInt(), "Prueba", true), 22)
-        add(android.widget.CheckBox(this).apply {
-            text = "Hoja de navegación (Google Maps)"
-            setTextColor(0xFFE9EEF3.toInt())
-            isChecked = prefs.navPage
-            setOnCheckedChangeListener { _, on ->
-                prefs.navPage = on
-                if (!on) NavState.clear()
-                if (on && !NavState.permitted(this@MaintenanceActivity)) {
-                    android.widget.Toast.makeText(this@MaintenanceActivity, "Activa \"Zoe SOC\" en acceso a notificaciones", android.widget.Toast.LENGTH_LONG).show()
-                    try { startActivity(android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) } catch (e: Exception) { }
-                }
-                ZoeState.touch()
-            }
-        }, 4)
-        add(label(13f, 0xFF8D97A1.toInt(), "Agrega una tercera hoja que muestra el giro, la distancia y la llegada mientras navegas con Google Maps en segundo plano."), 2)
-
         map.onChange = { changed() }
         setContentView(ScrollView(this).apply { setBackgroundColor(0xFF0F1215.toInt()); addView(col) })
     }
