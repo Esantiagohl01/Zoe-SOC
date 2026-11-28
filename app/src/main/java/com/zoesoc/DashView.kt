@@ -29,8 +29,8 @@ class DashView(ctx: Context) : View(ctx) {
     /** Hojas: 0 Digital, 1 Detalle y, si está activa la prueba, 2 Navegación. */
     private val pages: Int get() = if (prefs.navPage) 3 else 2
     var page: Int = prefs.page.coerceIn(0, 2)
-    private val digital: Boolean get() = page == 0 || page == 2
         private set
+    private val digital: Boolean get() = page == 0 || page == 2
     private var data: ZoeData? = null
     private var status = ""
 
