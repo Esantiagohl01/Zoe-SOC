@@ -290,35 +290,49 @@ class DashView(ctx: Context) : View(ctx) {
         } else {
             val sp = speed(d)
             val st = sp?.let { Fmt.f(it, 0) } ?: "--"
-            txt(c, st, x0, 400f, 116f, if (limiter.over) Colors.AMBER else textC, true)
-            txt(c, "km/h", x0 + tw(st, 116f, true) + 12f, 400f, 34f, dimC)
+            txt(c, st, x0, 345f, 116f, if (limiter.over) Colors.AMBER else textC, true)
+            txt(c, "km/h", x0 + tw(st, 116f, true) + 12f, 345f, 34f, dimC)
             drawLimitSign(c)
+            // Consumo instantáneo grande, justo debajo de la velocidad (suavizado a 3 s).
+            val inst = if (live(d)) smoothInst(d) else null
+            val iv = inst?.let { Fmt.f(it, 1) } ?: "--"
+            txt(c, iv, x0, 412f, 54f, textC, true)
+            txt(c, " kWh/100 km", x0 + tw(iv, 54f, true), 412f, 26f, 0xFFC8D0D8.toInt())
+            txt(c, "Instantáneo", bx1, 412f, 26f, dimC, align = Paint.Align.RIGHT)
             val pw = power(d)
-            txt(c, "regen", bx0, 456f, 30f, Colors.GREEN, true)
-            txt(c, pw?.let { Fmt.f(it, 1) + " kW" } ?: "-- kW", bx1, 456f, 30f, textC, true, Paint.Align.RIGHT)
+            txt(c, "regen", bx0, 466f, 30f, Colors.GREEN, true)
+            txt(c, pw?.let { Fmt.f(it, 1) + " kW" } ?: "-- kW", bx1, 466f, 30f, textC, true, Paint.Align.RIGHT)
             fill.color = 0xFF2A3038.toInt()
-            c.drawRoundRect(bx0, 474f, bx1, 494f, 10f, 10f, fill)
+            c.drawRoundRect(bx0, 484f, bx1, 504f, 10f, 10f, fill)
             // Escala −30 kW (regeneración) a +70 kW: el cero queda al 30 %.
             val zx = bx0 + (bx1 - bx0) * 0.30f
             if (pw != null) {
                 val vx = bx0 + (bx1 - bx0) * (((pw + 30) / 100).coerceIn(0.0, 1.0)).toFloat()
                 fill.color = if (pw < 0) Colors.GREEN else lightC
-                c.drawRoundRect(min(zx, vx), 476f, maxOf(zx, vx), 494f, 9f, 9f, fill)
+                c.drawRoundRect(min(zx, vx), 486f, maxOf(zx, vx), 504f, 9f, 9f, fill)
             }
             line.strokeWidth = 4f; line.color = textC
-            c.drawLine(zx, 464f, zx, 504f, line)
-            val inst = if (live(d)) d?.instantConsumption?.let { Fmt.f(it, 1) } else null
-            val avg = d?.avgConsumption?.let { Fmt.f(it, 1) }
-            // Consumo con unidades: dos bloques "Instantáneo" y "Promedio".
-            fun cons(x: Float, label: String, v: String?) {
-                txt(c, label, x, 526f, 24f, dimC)
-                val vs = v ?: "--"
-                txt(c, vs, x, 562f, 32f, textC, true)
-                txt(c, " kWh/100 km", x + tw(vs, 32f, true), 562f, 22f, 0xFFC8D0D8.toInt())
-            }
-            cons(x0, "Instantáneo", inst)
-            cons(x0 + 250f, "Promedio", avg)
+            c.drawLine(zx, 474f, zx, 514f, line)
+            // Promedio: una sola línea discreta al final.
+            var px = x0
+            txt(c, "Promedio ", px, 560f, 26f, dimC); px += tw("Promedio ", 26f, false)
+            val avg = d?.avgConsumption?.let { Fmt.f(it, 1) } ?: "--"
+            txt(c, avg, px, 560f, 26f, textC, true); px += tw(avg, 26f, true)
+            txt(c, " kWh/100 km", px, 560f, 26f, 0xFFC8D0D8.toInt())
         }
+    }
+
+    /** Promedio móvil de los últimos 3 s del consumo instantáneo, para que no salte tanto. */
+    private val instBuf = ArrayDeque<Pair<Long, Double>>()
+    private var instLastTs = 0L
+    private fun smoothInst(d: ZoeData?): Double? {
+        val v = d?.instantConsumption
+        if (d == null || v == null) { instBuf.clear(); return null }
+        val now = System.currentTimeMillis()
+        if (d.fastTime != instLastTs) { instLastTs = d.fastTime; instBuf.addLast(d.fastTime to v) }
+        while (instBuf.isNotEmpty() && now - instBuf.first().first > 3_000L) instBuf.removeFirst()
+        if (instBuf.isEmpty()) return v
+        return instBuf.sumOf { it.second } / instBuf.size
     }
 
     /** Página 2: salud de la batería, llantas y cargas. */
@@ -470,7 +484,7 @@ class DashView(ctx: Context) : View(ctx) {
         const val PHONE_X = 418f
         /** Señal del limitador, a la derecha de la velocidad. */
         const val SIGN_X = 892f
-        const val SIGN_Y = 358f
+        const val SIGN_Y = 305f
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
